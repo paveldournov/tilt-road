@@ -4,8 +4,10 @@ import {
   createState,
   step,
   road,
-  obstacle,
+  treasure,
+  HALF_WIDTH,
   MAX_SPEED,
+  advanceFrame,
 } from '../lib/game/core.ts';
 import { registerGameTools } from '../lib/game/webmcp.ts';
 const neutral = { pitch: 0, roll: 0 };
@@ -26,7 +28,7 @@ test('starts stationary and ready', () => {
 test('forward tilt accelerates and neutral coasts', () => {
   const s = running();
   advance(s, { pitch: 1, roll: 0 }, 2);
-  assert.ok(s.speed > 26 && s.speed < 31);
+  assert.ok(s.speed > 56 && s.speed < 61);
   advance(s, neutral, 1);
   const speed = s.speed;
   advance(s, neutral, 0.5);
@@ -56,36 +58,82 @@ test('speed is capped', () => {
   step(s, { pitch: 1, roll: 0 }, 0.05);
   assert.equal(s.speed, MAX_SPEED);
 });
-test('collision triggers at speed without tunneling', () => {
+
+test('new cruising speed reaches its cap quickly and still brakes to a stop', () => {
+  const s = running();
+  advance(s, { pitch: 1, roll: 0 }, 3.5);
+  assert.equal(s.speed, 96);
+  advance(s, { pitch: -1, roll: 0 }, 2);
+  assert.equal(s.speed, 0);
+});
+
+test('slow rendering does not slow the simulation clock', () => {
+  const slow = running(),
+    fast = running();
+  for (const [state, hz] of [
+    [slow, 10],
+    [fast, 120],
+  ]) {
+    for (let i = 0; i < hz * 2; i++)
+      advanceFrame(state, { pitch: 1, roll: 0 }, 1 / hz);
+  }
+  assert.ok(Math.abs(slow.speed - fast.speed) < 0.01);
+  assert.ok(Math.abs(slow.distance - fast.distance) < 0.01);
+});
+
+test('frame catch-up is bounded, ignores invalid time, and preserves pause', () => {
+  const s = running();
+  s.speed = MAX_SPEED;
+  advanceFrame(s, neutral, 10);
+  assert.ok(s.distance <= MAX_SPEED * 0.25 + 0.001);
+  const before = { ...s };
+  for (const elapsed of [NaN, Infinity, -1, 0])
+    advanceFrame(s, neutral, elapsed);
+  assert.deepEqual(s, before);
+  s.status = 'paused';
+  advanceFrame(s, { pitch: 1, roll: 1 }, 0.25);
+  assert.equal(s.distance, before.distance);
+});
+test('treasure is collected at maximum speed without slowing or crashing', () => {
   const s = running(),
-    o = obstacle(0);
+    o = treasure(0);
   s.distance = o.s - 4;
   s.lateral = o.x;
   s.speed = MAX_SPEED;
   step(s, neutral, 0.05);
-  assert.equal(s.status, 'crashed');
-  assert.match(s.reason, /barrier/);
+  assert.equal(s.status, 'running');
+  assert.equal(s.collected, 1);
+  assert.equal(s.lastCollected, 0);
+  assert.equal(s.speed, MAX_SPEED);
+  assert.ok(s.pickupFlash > 0);
 });
-test('safe passage increments cleared once', () => {
+test('missing treasure is harmless and does not award a pickup', () => {
   const s = running(),
-    o = obstacle(0);
+    o = treasure(0);
   s.distance = o.s - 5;
   s.lateral = o.x === 0 ? 5.3 : 0;
   s.speed = 30;
   advance(s, neutral, 1);
   assert.equal(s.status, 'running');
-  assert.equal(s.cleared, 1);
+  assert.equal(s.collected, 0);
+  assert.equal(s.speed, 30);
 });
-test('road departure ends the run', () => {
-  const s = running();
-  s.lateral = 8.34;
-  s.roll = 1;
-  step(s, { pitch: 0, roll: 1 }, 0.05);
-  assert.equal(s.status, 'crashed');
-  assert.match(s.reason, /off the road/);
+test('both road edges hold the rider safely and steering back still works', () => {
+  for (const direction of [-1, 1]) {
+    const s = running();
+    s.lateral = direction * 8.34;
+    s.roll = direction;
+    s.speed = MAX_SPEED;
+    advance(s, { pitch: 0, roll: direction }, 5);
+    assert.equal(s.status, 'running');
+    assert.equal(s.lateral, direction * (HALF_WIDTH - 0.65));
+    assert.equal(s.speed, MAX_SPEED);
+    advance(s, { pitch: 0, roll: -direction }, 1);
+    assert.ok(Math.abs(s.lateral) < HALF_WIDTH - 0.65);
+  }
 });
-test('paused and crashed runs do not advance', () => {
-  for (const status of ['paused', 'crashed']) {
+test('paused and ready runs do not advance', () => {
+  for (const status of ['paused', 'ready']) {
     const s = running();
     s.status = status;
     s.speed = 40;
@@ -120,14 +168,56 @@ test('all roads are finite, continuous and endless', () => {
       }
     }
 });
-test('generated obstacles always leave a passable lane', () => {
+test('treasures are generated continuously within reachable lanes', () => {
   for (let i = 0; i < 500; i++) {
-    const o = obstacle(i);
-    assert.ok(
-      [-5.3, 0, 5.3].some((x) => Math.abs(x - o.x) > o.width / 2 + 0.7),
-    );
-    assert.ok(o.s >= 150);
+    const o = treasure(i);
+    assert.ok(Math.abs(o.x) + o.radius < HALF_WIDTH);
+    assert.ok(o.s >= 90);
+    if (i > 0) assert.ok(o.s > treasure(i - 1).s);
   }
+});
+test('stopped and sideways movement cannot collect the same gem twice', () => {
+  const s = running(),
+    gem = treasure(0);
+  s.distance = gem.s;
+  s.lateral = gem.x;
+  advance(s, neutral, 3);
+  assert.equal(s.collected, 1);
+  advance(s, { pitch: 0, roll: 1 }, 1);
+  advance(s, { pitch: 0, roll: -1 }, 1);
+  assert.equal(s.collected, 1);
+});
+test('can steer sideways into treasure while stopped', () => {
+  const s = running(),
+    gem = treasure(0);
+  s.distance = gem.s;
+  s.lateral = gem.x + (gem.x > 0 ? -3 : 3);
+  advance(s, { pitch: 0, roll: gem.x > 0 ? 1 : -1 }, 1.5);
+  assert.equal(s.collected, 1);
+  assert.equal(s.speed, 0);
+  assert.equal(s.status, 'running');
+});
+test('next treasures score separately and restart resets the collection', () => {
+  const s = running();
+  for (let i = 0; i < 4; i++) {
+    const gem = treasure(i);
+    s.distance = gem.s - 4;
+    s.lateral = gem.x;
+    s.speed = MAX_SPEED;
+    step(s, neutral, 0.05);
+  }
+  assert.equal(s.collected, 4);
+  const reset = createState();
+  assert.equal(reset.collected, 0);
+  assert.equal(reset.lastCollected, -1);
+  assert.equal(reset.pickupFlash, 0);
+});
+test('long runs remain alive even with continuous outward tilt', () => {
+  const s = running();
+  advance(s, { pitch: 1, roll: 1 }, 90, 60);
+  assert.equal(s.status, 'running');
+  assert.ok(s.distance > 5000);
+  assert.ok(Number.isFinite(s.collected));
 });
 test('WebMCP contracts configure, read back and reject invalid data', () => {
   const registry = new Map();

@@ -1,6 +1,8 @@
 import {
   road,
-  obstacle,
+  treasure,
+  TREASURE_START,
+  TREASURE_SPACING,
   random,
   type GameState,
   type Scenery,
@@ -56,6 +58,13 @@ export class RoadRenderer {
   private roll = 0;
   private focal = 600;
   private faces: Face[] = [];
+  private roadFrames = new Map<
+    number,
+    { x: number; y: number; bank: number; cos: number; sin: number }
+  >();
+  private rotation = { cy: 1, sy: 0, cp: 1, sp: 0, cr: 1, sr: 0 };
+  private fogColors = new Map<string, string>();
+  private fogScenery: Scenery | null = null;
   constructor(private canvas: HTMLCanvasElement) {
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) throw new Error('Canvas unavailable');
@@ -68,34 +77,67 @@ export class RoadRenderer {
     const b = this.canvas.getBoundingClientRect();
     this.width = Math.max(1, b.width);
     this.height = Math.max(1, b.height);
-    const d = Math.min(window.devicePixelRatio || 1, 1.5);
+    // Bound raster work on large/Retina windows; layout stays in CSS pixels.
+    const d = Math.min(
+      window.devicePixelRatio || 1,
+      1.5,
+      Math.sqrt(1_920_000 / (this.width * this.height)),
+    );
     this.canvas.width = Math.round(this.width * d);
     this.canvas.height = Math.round(this.height * d);
     this.ctx.setTransform(d, 0, 0, d, 0, 0);
   }
   private point(s: number, x: number, y: number, mode: Topology): V {
-    const c = road(s, mode),
-      n = road(s + 0.5, mode),
-      a = Math.atan2(n.x - c.x, 0.5);
+    let c = this.roadFrames.get(s);
+    if (!c) {
+      const center = road(s, mode),
+        next = road(s + 0.5, mode);
+      const a = Math.atan2(next.x - center.x, 0.5);
+      c = { ...center, cos: Math.cos(a), sin: Math.sin(a) };
+      this.roadFrames.set(s, c);
+    }
     return {
-      x: c.x + x * Math.cos(a),
+      x: c.x + x * c.cos,
       y: c.y + y + x * c.bank,
-      z: s - x * Math.sin(a),
+      z: s - x * c.sin,
     };
   }
   private view(v: V): V {
     const x = v.x - this.cam.x,
       y = v.y - this.cam.y,
       z = v.z - this.cam.z;
-    const rx = x * Math.cos(this.yaw) - z * Math.sin(this.yaw),
-      rz = x * Math.sin(this.yaw) + z * Math.cos(this.yaw);
-    const ry = y * Math.cos(this.pitch) - rz * Math.sin(this.pitch),
-      zz = y * Math.sin(this.pitch) + rz * Math.cos(this.pitch);
+    const { cy, sy, cp, sp, cr, sr } = this.rotation;
+    const rx = x * cy - z * sy,
+      rz = x * sy + z * cy;
+    const ry = y * cp - rz * sp,
+      zz = y * sp + rz * cp;
     return {
-      x: rx * Math.cos(this.roll) - ry * Math.sin(this.roll),
-      y: rx * Math.sin(this.roll) + ry * Math.cos(this.roll),
+      x: rx * cr - ry * sr,
+      y: rx * sr + ry * cr,
       z: zz,
     };
+  }
+  private fogColor(color: string, fog: string, depth: number) {
+    const level = Math.round(
+      Math.min(0.98, Math.max(0, (depth - 130) / 780)) * 64,
+    );
+    if (!level) return color;
+    const key = `${color}:${level}`;
+    let mixed = this.fogColors.get(key);
+    if (!mixed) {
+      const base = parseInt(color.slice(1), 16),
+        target = parseInt(fog.slice(1), 16);
+      const alpha = level / 64;
+      const channels = [16, 8, 0].map((shift) =>
+        Math.round(
+          ((base >> shift) & 255) * (1 - alpha) +
+            ((target >> shift) & 255) * alpha,
+        ),
+      );
+      mixed = `rgb(${channels.join(',')})`;
+      this.fogColors.set(key, mixed);
+    }
+    return mixed;
   }
   private polygon(points: V[], color: string) {
     this.faces.push({ points, color });
@@ -144,6 +186,11 @@ export class RoadRenderer {
     this.polygon(h, top);
   }
   render(state: GameState, scenery: Scenery, time: number) {
+    this.roadFrames.clear();
+    if (this.fogScenery !== scenery) {
+      this.fogColors.clear();
+      this.fogScenery = scenery;
+    }
     const ctx = this.ctx,
       w = this.width,
       h = this.height,
@@ -157,6 +204,14 @@ export class RoadRenderer {
     this.yaw = Math.atan2(ahead.x - c.x, 2);
     this.pitch = Math.atan2(ahead.y - c.y, 2) - 0.025 - state.pitch * 0.025;
     this.roll = -state.roll * 0.07 - c.bank * 0.3;
+    this.rotation = {
+      cy: Math.cos(this.yaw),
+      sy: Math.sin(this.yaw),
+      cp: Math.cos(this.pitch),
+      sp: Math.sin(this.pitch),
+      cr: Math.cos(this.roll),
+      sr: Math.sin(this.roll),
+    };
     this.cam = this.point(
       s,
       state.lateral,
@@ -255,35 +310,38 @@ export class RoadRenderer {
           this.box(z, side * 9.6, 0.12, 1.1, 0.12, mode, p.stripe, '#e1ffef');
       }
     }
-    const first = Math.max(0, Math.floor((s - 10 - 150) / 76));
-    for (let i = first; i < first + 14; i++) {
-      const o = obstacle(i);
-      if (o.s > s + 920) continue;
-      this.box(o.s, o.x, o.width + 0.8, 0.04, 4.5, mode, '#152331', '#152331');
-      this.box(o.s, o.x, o.width, o.height, 2.8, mode, '#a95040', '#e58d62');
-      this.box(
-        o.s - 1.43,
-        o.x,
-        o.width + 0.03,
-        0.2,
-        0.04,
+    const first = Math.max(
+      0,
+      Math.floor((s - 10 - TREASURE_START) / TREASURE_SPACING),
+    );
+    for (let i = first; i < first + 21; i++) {
+      if (i === state.lastCollected) continue;
+      const gem = treasure(i);
+      if (gem.s > s + 920) continue;
+      const center = this.point(
+        gem.s,
+        gem.x,
+        2.3 + Math.sin(time * 2 + i) * 0.15,
         mode,
-        '#ffe2a8',
-        '#ffe2a8',
-        o.height * 0.72,
       );
-      for (let stripe = -1; stripe <= 1; stripe++)
-        this.box(
-          o.s - 1.48,
-          o.x + stripe * o.width * 0.29,
-          0.15,
-          o.height * 0.43,
-          0.02,
-          mode,
-          '#6b352f',
-          '#6b352f',
-          0.15,
+      const top = { ...center, y: center.y + 1.6 };
+      const bottom = { ...center, y: center.y - 1.6 };
+      const ring = Array.from({ length: 4 }, (_, side) => {
+        const angle = time * 0.9 + (side * Math.PI) / 2;
+        return {
+          x: center.x + Math.cos(angle) * gem.radius,
+          y: center.y,
+          z: center.z + Math.sin(angle) * gem.radius,
+        };
+      });
+      const gold = ['#ffdf79', '#ffeeb5', '#e8a635', '#f9c451'];
+      for (let side = 0; side < 4; side++) {
+        this.polygon([top, ring[side], ring[(side + 1) % 4]], gold[side]);
+        this.polygon(
+          [bottom, ring[(side + 1) % 4], ring[side]],
+          gold[(side + 2) % 4],
         );
+      }
     }
     for (let i = Math.floor((s - 50) / 35); i < Math.floor(s / 35) + 27; i++)
       for (const side of [-1, 1]) {
@@ -346,15 +404,16 @@ export class RoadRenderer {
         }
       }
     const projected = this.faces
-      .map((face) => ({
-        ...face,
-        points: face.points.map((v) => this.view(v)),
-      }))
-      .sort(
-        (a, b) =>
-          b.points.reduce((sum, v) => sum + v.z, 0) / b.points.length -
-          a.points.reduce((sum, v) => sum + v.z, 0) / a.points.length,
-      );
+      .map((face) => {
+        const points = face.points.map((v) => this.view(v));
+        return {
+          color: face.color,
+          points,
+          depth: points.reduce((sum, v) => sum + v.z, 0) / points.length,
+        };
+      })
+      .filter((face) => face.points.some((v) => v.z >= 0.5))
+      .sort((a, b) => b.depth - a.depth);
     for (const face of projected) {
       const clipped: V[] = [];
       for (let i = 0; i < face.points.length; i++) {
@@ -387,22 +446,18 @@ export class RoadRenderer {
         i ? ctx.lineTo(v.x, v.y) : ctx.moveTo(v.x, v.y),
       );
       ctx.closePath();
-      ctx.fillStyle = face.color;
-      ctx.fill();
       const depth = clipped.reduce((sum, v) => sum + v.z, 0) / clipped.length;
-      if (depth > 130) {
-        ctx.globalAlpha = Math.min(0.98, (depth - 130) / 780);
-        ctx.fillStyle = p.fog;
-        ctx.fill();
-        ctx.globalAlpha = 1;
-      }
+      // Mix opaque surface and fog once instead of rasterizing every face twice.
+      ctx.fillStyle = this.fogColor(face.color, p.fog, depth);
+      ctx.fill();
     }
-    // The deck sits below the rider and tilts independently of the view.
+    // Positive roll steers right: lower the right edge in Y-up space.
+    // Screen projection then flips Y, matching the HUD's clockwise roll.
     const deck = (x: number, y: number, z: number) => ({
       x: w / 2 + (x / (z + 1.6)) * this.focal,
       y:
         h * 0.49 -
-        ((y +
+        ((y -
           x * Math.sin(state.roll * 0.38) +
           (z - 3) * Math.sin(state.pitch * 0.1)) /
           (z + 1.6)) *
@@ -454,8 +509,8 @@ export class RoadRenderer {
       ],
       p.stripe,
     );
-    if (state.status === 'crashed') {
-      ctx.fillStyle = 'rgba(168,44,35,.16)';
+    if (state.pickupFlash > 0) {
+      ctx.fillStyle = `rgba(255,215,100,${state.pickupFlash * 0.07})`;
       ctx.fillRect(0, 0, w, h);
     }
   }

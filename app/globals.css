@@ -1,6 +1,143 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 @import 'shadcn/tailwind.css';
+
+.run-stats .treasure-count {
+  margin: 0 0 20px;
+  font-size: 16px;
+}
+.treasure-count strong {
+  display: block;
+  margin-top: 8px;
+  color: #ffe29a;
+  font-size: 32px;
+  font-weight: 500;
+}
+.pickup-feedback {
+  display: block;
+  height: 18px;
+  color: #ffe29a;
+  font-size: 12px;
+  letter-spacing: 1px;
+  margin-top: 5px;
+  transition: opacity 0.15s;
+}
+
+.phone-link-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 13px;
+  color: #ccebdc;
+  background: #17323c;
+  border: 1px solid #86b8a54d;
+  border-radius: 7px;
+  font-size: 14px;
+}
+.phone-link {
+  min-width: 0;
+}
+.phone-controller-control {
+  width: 260px;
+  max-width: 100%;
+  min-height: 60px;
+  gap: 12px;
+  padding: 9px 14px;
+  text-align: left;
+  background: #132d38b0;
+  border-color: #bbdacf30;
+  border-radius: 5px;
+  font-size: 0.875rem;
+  line-height: 1.4;
+}
+.phone-controller-control:hover {
+  background: #203e49;
+}
+.phone-controller-control svg {
+  flex-shrink: 0;
+  color: #bdd4d4;
+}
+.phone-controller-control[data-connected='true'] svg {
+  color: #a9f2d0;
+}
+.phone-controller-control[data-paused='true'] svg {
+  color: #efd28f;
+}
+.phone-controller-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.phone-controller-copy > span {
+  font-size: inherit;
+  line-height: inherit;
+  font-weight: 400;
+}
+.phone-controller-summary {
+  color: #b3c7c8;
+}
+.phone-pair-dialog {
+  background: #142e3b !important;
+  color: #e0f2e8 !important;
+  max-height: 90svh;
+  overflow-y: auto;
+  width: min(540px, calc(100vw - 32px)) !important;
+  max-width: 540px !important;
+  padding: 28px !important;
+  gap: 15px !important;
+}
+.phone-pair-dialog p {
+  margin: 0;
+  line-height: 1.6;
+  font-size: 15px;
+}
+.phone-link-status {
+  color: #b9ecd0;
+}
+.phone-pair-code {
+  padding: 18px;
+  text-align: center;
+  border: 1px solid #79b69c44;
+  border-radius: 9px;
+  background: #0f232e;
+}
+.phone-pair-code span {
+  display: block;
+  color: #accac5;
+  font-size: 12px;
+  letter-spacing: 2px;
+}
+.phone-pair-code strong {
+  display: block;
+  font-size: 42px;
+  letter-spacing: 9px;
+  font-weight: 500;
+  margin-top: 8px;
+}
+.phone-url {
+  color: #bff4d6;
+  overflow-wrap: anywhere;
+  font-size: 16px;
+}
+.phone-pair-dialog summary {
+  cursor: pointer;
+  padding: 8px 0;
+  font-size: 14px;
+}
+.phone-pair-dialog code {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+.phone-link-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+@media (max-width: 700px) {
+  .top-actions {
+    gap: 8px !important;
+  }
+}
 @custom-variant dark (&:is(.dark *));
 @theme inline {
   --color-background: var(--background);
@@ -78,15 +215,28 @@ a:focus-visible {
     ),
     linear-gradient(90deg, #10233133, transparent 60%);
 }
-.topbar {
+.upper-hud {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 32px 20px;
+  padding: 28px 38px;
+  pointer-events: none;
+}
+.upper-hud > * {
+  pointer-events: auto;
+}
+.topbar {
+  grid-column: 1 / -1;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  padding: 28px 38px;
+  gap: 16px;
 }
 .brand {
   color: #f5f8f2;
@@ -155,10 +305,8 @@ i {
   background: #a9f2d02a;
 }
 .world-controls {
-  position: absolute;
-  top: 123px;
-  left: 40px;
   width: 190px;
+  max-width: 100%;
 }
 .control-label {
   display: flex;
@@ -193,9 +341,7 @@ i {
   padding: 10px;
 }
 .run-stats {
-  position: absolute;
-  right: 40px;
-  top: 127px;
+  justify-self: end;
   text-align: right;
 }
 .eyebrow {
@@ -496,23 +642,25 @@ kbd {
     left: 260px;
   }
   .world-controls {
-    top: 103px;
-    left: 26px;
+    width: 190px;
   }
-  .run-stats {
-    top: 105px;
-    right: 26px;
-  }
-  .topbar {
+  .upper-hud {
     padding: 22px 25px;
+    row-gap: 24px;
   }
 }
 @media (max-width: 700px) {
   .game-shell {
-    min-height: 780px;
+    min-height: 940px;
   }
-  .topbar {
+  .upper-hud {
     padding: 17px 20px;
+    gap: 24px 16px;
+    grid-template-columns: minmax(0, 165px) minmax(0, 1fr);
+  }
+  .top-actions {
+    width: 100%;
+    justify-content: space-between;
   }
   .brand {
     font-size: 18px;
@@ -521,13 +669,7 @@ kbd {
     display: none;
   }
   .world-controls {
-    left: 20px;
-    top: 90px;
     width: 165px;
-  }
-  .run-stats {
-    right: 20px;
-    top: 92px;
   }
   .run-stats > div {
     font-size: 27px;
@@ -547,7 +689,7 @@ kbd {
   }
   .start-panel {
     left: 24px;
-    top: 34%;
+    top: max(40%, 390px);
     width: calc(100% - 48px);
   }
   .start-panel h1 {

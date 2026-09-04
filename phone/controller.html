@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#102631" />
+    <title>RoadTilt · Tilt controller</title>
+    <link rel="stylesheet" href="/controller.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <span class="brand">∕∕ ROADTILT</span
+        ><span class="badge" id="connection">OFFLINE</span>
+      </header>
+      <p class="eyebrow">PHONE CONTROLLER</p>
+      <h1>Lean into it.</h1>
+      <p id="message" role="status" aria-live="polite">
+        Enter the pairing code shown in the computer game.
+      </p>
+      <section id="pairing">
+        <label for="code">Pairing code</label>
+        <div class="pair-row">
+          <input
+            id="code"
+            inputmode="numeric"
+            autocomplete="off"
+            maxlength="2"
+            placeholder="00"
+            aria-label="Two-digit pairing code"
+          /><button id="join" class="primary">Connect</button>
+        </div>
+      </section>
+      <section id="motion-controls">
+        <div class="section-title">
+          <h2>01 / Motion</h2>
+          <span class="badge" id="motion-state">NOT ENABLED</span>
+        </div>
+        <p>
+          Hold the phone in portrait, screen facing you and tilted back
+          slightly—not upright. Tip its top edge away to accelerate; toward you
+          to brake.
+        </p>
+        <button id="enable" class="secondary" disabled>Enable motion</button
+        ><button id="calibrate" class="secondary" disabled>
+          Calibrate neutral
+        </button>
+        <p
+          id="calibration-message"
+          class="hint"
+          role="status"
+          aria-live="polite"
+        >
+          Tap Calibrate neutral to instantly set your current position to zero.
+        </p>
+      </section>
+      <section class="telemetry" aria-label="Live measurements">
+        <div>
+          <span>PITCH</span><strong id="pitch">0%</strong
+          ><meter
+            id="pitch-meter"
+            min="-1"
+            max="1"
+            value="0"
+            aria-label="Forward and backward tilt"
+          ></meter>
+        </div>
+        <div>
+          <span>ROLL</span><strong id="roll">0%</strong
+          ><meter
+            id="roll-meter"
+            min="-1"
+            max="1"
+            value="0"
+            aria-label="Left and right tilt"
+          ></meter>
+        </div>
+        <p id="angles">Waiting for motion readings.</p>
+        <p id="flight">Waiting for the game.</p>
+      </section>
+      <div class="flight-buttons">
+        <button id="start" class="primary" disabled>Start / Resume</button
+        ><button id="pause" class="stop" disabled>Pause</button
+        ><button id="restart" class="secondary" disabled>Restart run</button>
+      </div>
+      <section
+        class="sensitivity-settings"
+        aria-labelledby="sensitivity-heading"
+      >
+        <h2 id="sensitivity-heading">02 / Sensitivity</h2>
+        <p>
+          Slide right for more response from less tilt. 1× is the original
+          sensitivity; 2× is the new default.
+        </p>
+        <div class="sensitivity-control">
+          <label for="roll-sensitivity"
+            >Steering
+            <output id="roll-gain" for="roll-sensitivity">2.0×</output></label
+          >
+          <input
+            type="range"
+            id="roll-sensitivity"
+            min="0.5"
+            max="4"
+            step="0.1"
+            value="2"
+            aria-describedby="roll-response"
+          />
+          <div class="range-ends" aria-hidden="true">
+            <span>Gentle · 0.5×</span><span>Responsive · 4×</span>
+          </div>
+          <p class="hint" id="roll-response">
+            Full steering at 13.5° from neutral.
+          </p>
+        </div>
+        <div class="sensitivity-control">
+          <label for="pitch-sensitivity"
+            >Acceleration / braking
+            <output id="pitch-gain" for="pitch-sensitivity">2.0×</output></label
+          >
+          <input
+            type="range"
+            id="pitch-sensitivity"
+            min="0.5"
+            max="4"
+            step="0.1"
+            value="2"
+            aria-describedby="pitch-response"
+          />
+          <div class="range-ends" aria-hidden="true">
+            <span>Gentle · 0.5×</span><span>Responsive · 4×</span>
+          </div>
+          <p class="hint" id="pitch-response">
+            Full acceleration / braking at 13.5° from neutral.
+          </p>
+        </div>
+        <p class="hint">
+          Release a slider to apply. Changes pause the game but keep your
+          calibration. Tap Start / Resume when ready.
+        </p>
+        <button id="reset-sensitivity" class="secondary">
+          Reset both to 2×
+        </button>
+      </section>
+      <p class="hint">
+        Keep this page open. Locking the phone, changing orientation, or losing
+        the signal pauses the game. Your zero position is kept; tap Start /
+        Resume when ready.
+      </p>
+      <button id="disconnect" class="text-button" disabled>
+        Disconnect phone
+      </button>
+      <p class="hint"><a href="/setup">Certificate &amp; connection help</a></p>
+    </main>
+    <script type="module" src="/controller.js"></script>
+  </body>
+</html>

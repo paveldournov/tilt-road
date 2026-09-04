@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { memo, startTransition, useEffect, useRef, useState } from 'react';
 import {
   ArrowUpRight,
   RotateCcw,
@@ -8,7 +8,6 @@ import {
   Play,
   Maximize,
   Activity,
-  Keyboard,
   Mountain,
   Route,
 } from 'lucide-react';
@@ -21,16 +20,20 @@ import {
 } from '@/components/ui/select';
 import {
   createState,
-  step,
+  advanceFrame,
+  MAX_SPEED,
   type GameState,
   type Topology,
   type Scenery,
 } from '@/lib/game/core';
 import { TiltInput } from '@/lib/game/input';
 import { RoadRenderer } from '@/lib/game/renderer';
+import { PhoneLink as PhoneLinkComponent } from '@/components/phone-link';
 import { registerGameTools, type GameModelContext } from '@/lib/game/webmcp';
 
 const roads = { flow: 'Flow', serpentine: 'Serpentine', alpine: 'Alpine' };
+// Speed/score telemetry must not re-render the phone dialog and its controls.
+const PhoneLink = memo(PhoneLinkComponent);
 const worlds = {
   coast: 'Pacific dusk',
   desert: 'Red canyon',
@@ -74,6 +77,9 @@ export default function Home() {
   }
   useEffect(() => {
     if (!canvas.current) return;
+    // A live development update can retain the previous game-state shape.
+    if (!Number.isFinite(game.current.collected))
+      game.current = createState(game.current.topology);
     let renderer: RoadRenderer;
     try {
       renderer = new RoadRenderer(canvas.current);
@@ -85,6 +91,21 @@ export default function Home() {
     }
     const controller = new TiltInput();
     input.current = controller;
+    const onPhoneCommand = (event: Event) => {
+      const action = (event as CustomEvent<{ action: string }>).detail?.action;
+      if (action === 'pause' || action === 'lost') {
+        controller.clear();
+        if (game.current.status === 'running') game.current.status = 'paused';
+        setHud({ ...game.current });
+      } else if (!document.hidden && action === 'restart') restart();
+      else if (
+        !document.hidden &&
+        action === 'start' &&
+        ['ready', 'paused'].includes(game.current.status)
+      )
+        begin();
+    };
+    window.addEventListener('roadtilt:phone-command', onPhoneCommand);
     const unregister = registerGameTools(
       (document as Document & { modelContext?: GameModelContext }).modelContext,
       () => ({ ...game.current, scenery: sceneryRef.current }),
@@ -96,10 +117,14 @@ export default function Home() {
     );
     let frame = 0,
       last = performance.now(),
+      lastRender = 0,
       update = 0,
-      record = 0;
+      record = 0,
+      savedRecord = 0,
+      lastSave = 0;
     try {
       record = Number(localStorage.getItem('roadtilt-best')) || 0;
+      savedRecord = record;
       setBest(record);
     } catch {
       /* Storage is optional. */
@@ -116,8 +141,7 @@ export default function Home() {
         pause();
       }
       if (event.code === 'Enter' && game.current.status !== 'running') {
-        if (game.current.status === 'crashed') restart();
-        else begin();
+        begin();
       }
       if (event.code === 'KeyR') restart();
     };
@@ -127,6 +151,7 @@ export default function Home() {
         setHud({ ...game.current });
       }
       controller.clear();
+      saveRecord();
     };
     const onVisibility = () => {
       if (document.hidden) onBlur();
@@ -138,34 +163,52 @@ export default function Home() {
     document.addEventListener('visibilitychange', onVisibility);
     document.addEventListener('fullscreenchange', onFullscreen);
     function tick(now: number) {
-      const dt = Math.min((now - last) / 1000, 0.05);
+      const dt = (now - last) / 1000;
       last = now;
-      step(game.current, controller.read(now), dt);
-      renderer.render(game.current, sceneryRef.current, now / 1000);
-      if (now - update > 75) {
+      if (document.hidden) {
+        frame = requestAnimationFrame(tick);
+        return;
+      }
+      advanceFrame(game.current, controller.read(now), dt);
+      const renderInterval =
+        game.current.status === 'running' ? 1000 / 60 : 1000 / 20;
+      if (now - lastRender >= renderInterval - 0.5) {
+        renderer.render(game.current, sceneryRef.current, now / 1000);
+        lastRender = now - ((now - lastRender) % renderInterval);
+      }
+      if (game.current.status === 'running' && now - update > 75) {
         update = now;
-        setHud({ ...game.current });
-        if (
-          game.current.status === 'crashed' &&
-          game.current.distance > record
-        ) {
+        const snapshot = { ...game.current };
+        startTransition(() => setHud(snapshot));
+        if (Math.floor(game.current.distance) > record) {
           record = Math.floor(game.current.distance);
-          setBest(record);
-          try {
-            localStorage.setItem('roadtilt-best', String(record));
-          } catch {
-            /* Continue without storage. */
-          }
+          startTransition(() => setBest(record));
+        }
+        if (now - lastSave >= 1000) {
+          saveRecord();
+          lastSave = now;
         }
       }
       frame = requestAnimationFrame(tick);
     }
     frame = requestAnimationFrame(tick);
+    function saveRecord() {
+      record = Math.max(record, Math.floor(game.current.distance));
+      if (record <= savedRecord) return;
+      try {
+        localStorage.setItem('roadtilt-best', String(record));
+        savedRecord = record;
+      } catch {
+        /* Storage is optional. */
+      }
+    }
     return () => {
+      saveRecord();
       unregister();
       cancelAnimationFrame(frame);
       renderer.dispose();
       controller.dispose();
+      window.removeEventListener('roadtilt:phone-command', onPhoneCommand);
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('blur', onBlur);
       document.removeEventListener('visibilitychange', onVisibility);
@@ -183,96 +226,110 @@ export default function Home() {
         aria-label="First-person endless hover road. W or up accelerates, A and D or left and right steer, S or down brakes."
       />
       <div className="vignette" />
-      <header className="topbar">
-        <a className="brand" href="/" aria-label="RoadTilt home">
-          <span className="brand-mark">∕∕</span> ROAD<span>TILT</span>
-          <small>HOVER EXPERIMENT / 01</small>
-        </a>
-        <div className="top-actions">
-          <span className="input-status">
-            <i /> <Keyboard size={16} /> KEYBOARD
-          </span>
-          <button
-            className="icon-button"
-            aria-label={fullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
-            onClick={async () => {
-              try {
-                if (document.fullscreenElement) await document.exitFullscreen();
-                else await document.documentElement.requestFullscreen();
-                canvas.current?.focus();
-              } catch {
-                setError(
-                  'Fullscreen is unavailable here. You can still play in this window.',
-                );
-              }
+      <div className="upper-hud">
+        <header className="topbar">
+          <a className="brand" href="/" aria-label="RoadTilt home">
+            <span className="brand-mark">∕∕</span> ROAD<span>TILT</span>
+            <small>HOVER EXPERIMENT / 01</small>
+          </a>
+          <div className="top-actions">
+            <PhoneLink game={game} />
+            <button
+              className="icon-button"
+              aria-label={fullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
+              onClick={async () => {
+                try {
+                  if (document.fullscreenElement)
+                    await document.exitFullscreen();
+                  else await document.documentElement.requestFullscreen();
+                  canvas.current?.focus();
+                } catch {
+                  setError(
+                    'Fullscreen is unavailable here. You can still play in this window.',
+                  );
+                }
+              }}
+            >
+              <Maximize size={19} />
+            </button>
+          </div>
+        </header>
+        <section className="world-controls" aria-label="World settings">
+          <div className="control-label">
+            <Route size={16} />
+            <span>ROAD TOPOLOGY</span>
+          </div>
+          <Select
+            value={topology}
+            onValueChange={(v) => {
+              if (v) changeRoad(v as Topology);
+            }}
+            onOpenChange={(open) => {
+              if (open && game.current.status === 'running') pause();
             }}
           >
-            <Maximize size={19} />
-          </button>
-        </div>
-      </header>
-      <section className="world-controls" aria-label="World settings">
-        <div className="control-label">
-          <Route size={16} />
-          <span>ROAD TOPOLOGY</span>
-        </div>
-        <Select
-          value={topology}
-          onValueChange={(v) => {
-            if (v) changeRoad(v as Topology);
-          }}
-          onOpenChange={(open) => {
-            if (open && game.current.status === 'running') pause();
-          }}
-        >
-          <SelectTrigger aria-label="Road topology" className="world-select">
-            <SelectValue>{roads[topology]}</SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            {Object.entries(roads).map(([key, title]) => (
-              <SelectItem key={key} value={key}>
-                {title}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <div className="control-label scenery-label">
-          <Mountain size={16} />
-          <span>SCENERY</span>
-        </div>
-        <Select
-          value={scenery}
-          onValueChange={(v) => {
-            if (v) {
-              setScenery(v as Scenery);
-              sceneryRef.current = v as Scenery;
-            }
-          }}
-          onOpenChange={(open) => {
-            if (open && game.current.status === 'running') pause();
-          }}
-        >
-          <SelectTrigger aria-label="Scenery" className="world-select">
-            <SelectValue>{worlds[scenery]}</SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            {Object.entries(worlds).map(([key, title]) => (
-              <SelectItem key={key} value={key}>
-                {title}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <span className="road-note">Changing road starts a new run.</span>
-      </section>
-      <aside className="run-stats">
-        <span className="eyebrow">DISTANCE</span>
-        <div>
-          {(hud.distance / 1000).toFixed(2)}
-          <small> KM</small>
-        </div>
-        <span className="best">BEST {(best / 1000).toFixed(2)} KM</span>
-      </aside>
+            <SelectTrigger aria-label="Road topology" className="world-select">
+              <SelectValue>{roads[topology]}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {Object.entries(roads).map(([key, title]) => (
+                <SelectItem key={key} value={key}>
+                  {title}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <div className="control-label scenery-label">
+            <Mountain size={16} />
+            <span>SCENERY</span>
+          </div>
+          <Select
+            value={scenery}
+            onValueChange={(v) => {
+              if (v) {
+                setScenery(v as Scenery);
+                sceneryRef.current = v as Scenery;
+              }
+            }}
+            onOpenChange={(open) => {
+              if (open && game.current.status === 'running') pause();
+            }}
+          >
+            <SelectTrigger aria-label="Scenery" className="world-select">
+              <SelectValue>{worlds[scenery]}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {Object.entries(worlds).map(([key, title]) => (
+                <SelectItem key={key} value={key}>
+                  {title}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <span className="road-note">Changing road starts a new run.</span>
+        </section>
+        <aside className="run-stats">
+          <div
+            className="treasure-count"
+            aria-label={`${hud.collected} treasures collected`}
+          >
+            <span className="eyebrow">TREASURES</span>
+            <strong>◆ {hud.collected}</strong>
+            <span
+              className="pickup-feedback"
+              style={{ opacity: hud.pickupFlash > 0 ? 1 : 0 }}
+            >
+              +1 TREASURE
+            </span>
+          </div>
+          <span className="eyebrow">DISTANCE</span>
+          <div>
+            {(hud.distance / 1000).toFixed(2)}
+            <small> KM</small>
+          </div>
+          <span className="best">BEST {(best / 1000).toFixed(2)} KM</span>
+        </aside>
+      </div>
       <div className="reticle" aria-hidden="true">
         <span />
         <span />
@@ -283,12 +340,7 @@ export default function Home() {
           aria-live="polite"
         >
           <span className="eyebrow">
-            <i />{' '}
-            {ready
-              ? 'THE ROAD IS YOURS'
-              : hud.status === 'paused'
-                ? 'TAKE A BREATH'
-                : 'FLIGHT RECORDER'}
+            <i /> {ready ? 'THE ROAD IS YOURS' : 'TAKE A BREATH'}
           </span>
           <h1>
             {ready ? (
@@ -297,31 +349,17 @@ export default function Home() {
                 <br />
                 <em>balance.</em>
               </>
-            ) : hud.status === 'paused' ? (
-              'Flight paused.'
             ) : (
-              'Run complete.'
+              'Flight paused.'
             )}
           </h1>
           <p>
             {ready
-              ? 'Lean into an endless road. Stay light. Stay clear.'
-              : hud.status === 'paused'
-                ? 'Your platform is right where you left it.'
-                : `${hud.reason} You travelled ${(hud.distance / 1000).toFixed(2)} km and cleared ${hud.cleared} obstacles.`}
+              ? 'Follow the gold. Collect treasures. Fly without limits—no crashes.'
+              : `Your platform is right where you left it. ${hud.collected} treasures collected.`}
           </p>
-          <button
-            className="launch-button"
-            onClick={() => {
-              if (hud.status === 'crashed') restart();
-              else begin();
-            }}
-          >
-            {ready
-              ? 'Start flying'
-              : hud.status === 'paused'
-                ? 'Resume flight'
-                : 'Fly again'}
+          <button className="launch-button" onClick={begin}>
+            {ready ? 'Start flying' : 'Resume flight'}
             <ArrowUpRight size={21} />
           </button>
           <span className="enter-hint">or press ENTER</span>
@@ -345,7 +383,7 @@ export default function Home() {
             <small>KM/H</small>
           </div>
           <div className="speed-track">
-            <i style={{ width: `${(hud.speed / 62) * 100}%` }} />
+            <i style={{ width: `${(hud.speed / MAX_SPEED) * 100}%` }} />
           </div>
           <span className="speed-state">
             {hud.status === 'running'
@@ -356,9 +394,7 @@ export default function Home() {
                   : hud.speed < 0.1
                     ? 'STATIONARY'
                     : 'COASTING'
-              : hud.status === 'crashed'
-                ? 'FLIGHT ENDED'
-                : 'READY FOR FLIGHT'}
+              : 'READY FOR FLIGHT'}
           </span>
         </section>
         <section className="tilt-display" aria-label="Platform tilt">
@@ -407,7 +443,7 @@ export default function Home() {
           <button
             className="icon-button"
             aria-label={hud.status === 'paused' ? 'Resume' : 'Pause'}
-            disabled={ready || hud.status === 'crashed'}
+            disabled={ready}
             onClick={pause}
           >
             {hud.status === 'paused' ? <Play size={18} /> : <Pause size={18} />}

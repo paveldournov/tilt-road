@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>RoadTilt · iPhone setup</title>
+    <link rel="stylesheet" href="/controller.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <span class="brand">∕∕ ROADTILT</span
+        ><span class="badge">LOCAL CONNECTION</span>
+      </header>
+      <p class="eyebrow">ONE-TIME IPHONE SETUP</p>
+      <h1>Your phone.<br /><em>Your platform.</em></h1>
+      <p>
+        Connect your iPhone and computer to the same home network. Open this
+        page in Safari. No cloud account or app is needed.
+      </p>
+      <section>
+        <h2>1. Install the local certificate</h2>
+        <p>
+          iPhone motion access requires HTTPS. This profile contains only a
+          development certificate—not device management or a VPN.
+        </p>
+        <a class="primary" href="/roadtilt.mobileconfig"
+          >Download certificate profile</a
+        >
+        <p>
+          Tap Allow. Then open
+          <strong
+            >Settings → General → VPN &amp; Device Management → RoadTilt Local
+            Controller → Install</strong
+          >.
+        </p>
+      </section>
+      <section>
+        <h2>2. Enable certificate trust</h2>
+        <p>
+          Open
+          <strong
+            >Settings → General → About → Certificate Trust Settings</strong
+          >. Enable full trust for <strong>RoadTilt Local Controller</strong>.
+        </p>
+        <p class="notice">
+          Only trust the certificate from your own computer. It allows that
+          computer’s local CA to issue trusted certificates. Keep its private
+          key private, and remove this profile when you’re done testing.
+        </p>
+        <details>
+          <summary>Verify the certificate</summary>
+          <p>
+            Compare this SHA-256 fingerprint with the one shown on the
+            computer’s pairing panel:
+          </p>
+          <code>{{FINGERPRINT}}</code>
+          <p>Expires: {{EXPIRY}}</p>
+        </details>
+        <p>
+          <a
+            href="https://support.apple.com/en-us/102390"
+            target="_blank"
+            rel="noreferrer"
+            >Apple’s certificate trust instructions ↗</a
+          >
+        </p>
+      </section>
+      <section>
+        <h2>3. Pair and fly</h2>
+        <p>
+          In the computer game, click <strong>Connect iPhone</strong>. Open the
+          controller below and enter the two-digit pairing code. Enable motion,
+          hold still to calibrate, and tap Start.
+        </p>
+        <a class="primary" href="{{CONTROLLER_URL}}">Open phone controller →</a>
+      </section>
+      <section>
+        <h2>Can’t connect?</h2>
+        <p>
+          Use the same Wi-Fi/LAN, not cellular or an isolated guest network. If
+          Windows asks, allow Node.js on your
+          <strong>Private network only</strong>. The server uses TCP ports 8786
+          and 8787. Don’t open router ports or expose this server to the
+          internet.
+        </p>
+        <p>
+          To remove trust later: Settings → General → VPN &amp; Device
+          Management → RoadTilt Local Controller → Remove Profile.
+        </p>
+      </section>
+    </main>
+  </body>
+</html>

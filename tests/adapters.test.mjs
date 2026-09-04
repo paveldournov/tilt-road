@@ -15,6 +15,34 @@ globalThis.HTMLElement = class extends EventTarget { closest() { return null; } 
 function key(type, code) { const event = new Event(type); Object.assign(event, { code }); window.dispatchEvent(event); }
 const { TiltInput } = await moduleFromSource('input');
 
+test('game phone receiver rejects stale starts and pauses on missing packets', async t => {
+  let now=100, tick;
+  const sockets=[],inputs=[],commands=[],lost=[];
+  class FakeSocket {
+    static OPEN=1;
+    readyState=1;bufferedAmount=0;
+    constructor(){sockets.push(this);}
+    close(){this.onclose?.();}
+    send(){}
+    receive(data){this.onmessage({data:JSON.stringify(data)});}
+  }
+  const previous=globalThis.WebSocket;globalThis.WebSocket=FakeSocket;
+  t.after(()=>{globalThis.WebSocket=previous;});
+  t.mock.method(performance,'now',()=>now);
+  t.mock.method(globalThis,'setInterval',fn=>{tick=fn;return 1;});
+  t.mock.method(globalThis,'clearInterval',()=>{});
+  const {PhoneClient}=await moduleFromSource('phone-client');
+  const client=new PhoneClient({info(){},status(){},input:v=>inputs.push(v),command:v=>commands.push(v),lost:()=>lost.push(true),state:()=>({status:'running',speed:20})});
+  client.connect();const socket=sockets[0];
+  socket.receive({type:'command',action:'start'});assert.equal(commands.length,0);
+  socket.receive({type:'input',pitch:.4,roll:-.2});assert.deepEqual(inputs[0],{pitch:.4,roll:-.2});
+  socket.receive({type:'command',action:'start'});assert.deepEqual(commands,['start']);
+  now+=501;tick();assert.equal(lost.length,1);
+  socket.receive({type:'command',action:'restart'});assert.deepEqual(commands,['start']);
+  socket.receive({type:'command',action:'pause'});assert.deepEqual(commands,['start','pause']);
+  socket.receive(null);client.disconnect();assert.equal(lost.length,2);
+});
+
 test('keyboard directions, diagonals and release', () => {
   const input = new TiltInput();
   key('keydown','KeyW'); key('keydown','ArrowLeft');
@@ -36,6 +64,33 @@ test('sensor clamping, keyboard priority, expiry and blur safety', () => {
   window.dispatchEvent(new Event('blur')); assert.deepEqual(input.read(performance.now()), { pitch:0, roll:0 });
   input.dispose(); key('keydown','KeyW'); assert.deepEqual(input.read(performance.now()), { pitch:0, roll:0 });
 });
+test('board lowers the edge in the steering direction', async () => {
+  let path = [], deck = [];
+  const properties = {};
+  const ctx = new Proxy(properties, {
+    get(target, key) {
+      if (key === 'createLinearGradient') return () => ({ addColorStop() {} });
+      if (key === 'beginPath') return () => { path = []; };
+      if (key === 'moveTo' || key === 'lineTo') return (x, y) => path.push({ x, y });
+      if (key === 'fill') return () => { if (target.fillStyle === '#101f2b') deck = path.map(p => ({ ...p })); };
+      return key in target ? target[key] : () => {};
+    },
+  });
+  globalThis.ResizeObserver = class { observe() {} disconnect() {} };
+  window.devicePixelRatio = 1;
+  const { RoadRenderer } = await moduleFromSource('renderer');
+  const renderer = new RoadRenderer({ getContext: () => ctx, getBoundingClientRect: () => ({ width:1280,height:800 }) });
+  for (const roll of [-1, 0, 1]) {
+    renderer.render({ ...createState(), roll }, 'coast', 0);
+    assert.equal(deck.length, 6);
+    const [left, right] = deck;
+    assert.ok(left.x < right.x);
+    // Canvas Y grows downward. Positive roll means the right edge is lower.
+    assert.equal(Math.sign(right.y - left.y), roll);
+  }
+  renderer.dispose();
+});
+
 test('renderer handles all road/scenery combinations and distant coordinates', async () => {
   let paths=0;
   const ctx = new Proxy({}, { get: (_target, key) => key === 'createLinearGradient' ? () => ({ addColorStop() {} }) : (...args) => { for (const arg of args) if (typeof arg === 'number') assert.ok(Number.isFinite(arg), `${String(key)} has nonfinite geometry`); if(key==='fill')paths++; }, set: () => true });

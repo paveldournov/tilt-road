@@ -19,9 +19,11 @@ Requires Node 22.13+ and npm. Run `npm install`, then `npm run dev`. Open the UR
 
 Choose Flow (gentle curves), Serpentine (tight linked turns), or Alpine (rolling elevation and banks). Road changes reset the run. Scenery choices are Pacific dusk, Red canyon and Neon midnight. Opening settings pauses an active flight; resume when finished.
 
-Avoid orange barriers and road edges. Best completed-run distance is stored only in this browser. The forward view follows the road tangent automatically; steering controls your lateral position. This is an arcade prototype, not a physical vehicle simulator.
+Collect the floating gold gems to increase your treasure counter. Each gem counts once and disappears when collected; missed gems carry no penalty. There are no crashes: road edges keep your platform safely on the track without slowing it down. Restarting or changing road resets the treasure count. Best distance is stored only in this browser. The forward view follows the road tangent automatically; steering controls your lateral position. This is an arcade prototype, not a physical vehicle simulator.
 
 ## Future motion-device input
+
+An iPhone controller and local HTTPS/WebSocket server are now available. See [PHONE-CONTROLLER.md](PHONE-CONTROLLER.md) for setup, pairing, certificate trust, and safety details. Start it with `npm run phone:server`; in the game click **Connect iPhone**.
 
 `lib/game/input.ts` separates transport from simulation. A local serial/WebSocket bridge can dispatch normalized samples:
 
@@ -37,13 +39,13 @@ Pitch: -1 full brake, 0 neutral, +1 full acceleration. Roll: -1 left, +1 right. 
 
 ## Verification
 
-`npm test` covers physics, boundaries, collision at maximum speed, continuous generation, input handling and optional WebMCP contracts. `npm run typecheck` checks TypeScript.
+`npm test` covers physics, safe boundaries, treasure collection at maximum speed, no duplicate pickups, continuous generation, input handling and optional WebMCP contracts. `npm run typecheck` checks TypeScript.
 
 Optional WebMCP tools read flight state and configure/reset a flight. They are feature-detected. Contract tests use a mock registry; live-browser WebMCP and interactive browser/visual QA have not been run.
 
 ## Architecture
 
-- `lib/game/core.ts`: deterministic road, obstacle generation and physics.
+- `lib/game/core.ts`: deterministic road, treasure generation and physics.
 - `lib/game/input.ts`: keyboard/touch and sensor packet adapter.
 - `lib/game/renderer.ts`: procedural world and visible hover deck.
 - `app/page.tsx`: game lifecycle, controls and HUD.
