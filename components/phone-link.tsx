@@ -83,7 +83,7 @@ export function PhoneLink({ game }: { game: RefObject<GameState> }) {
       : connection === 'ready'
         ? 'Motion live'
         : connection === 'paused'
-          ? 'Motion paused · recalibrate'
+          ? 'Motion paused · zero saved'
           : status === 'Keyboard'
             ? 'Use your phone to steer'
             : status === 'Waiting for iPhone'

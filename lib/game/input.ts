@@ -1,3 +1,4 @@
+import { freshMotion } from '../../phone/protocol.js';
 import { clamp, type Tilt } from './core';
 
 /** Transport-independent input. Sensor packets are normalized to [-1, 1]. */
@@ -8,7 +9,9 @@ export class TiltInput {
   private down = (e: KeyboardEvent) => {
     if (
       e.target instanceof HTMLElement &&
-      e.target.closest('button,input,[role="combobox"],[role="listbox"]')
+      e.target.closest(
+        'button,input,[role="dialog"],[role="slider"],[role="switch"],[role="combobox"],[role="listbox"]',
+      )
     )
       return;
     if (
@@ -32,12 +35,14 @@ export class TiltInput {
   };
   private blur = () => this.clear();
   private sample = (e: Event) => {
-    const data = (e as CustomEvent<Tilt>).detail;
+    const data = (e as CustomEvent<Tilt & { at?: number }>).detail;
     if (data && Number.isFinite(data.pitch) && Number.isFinite(data.roll))
       this.sensor = {
         pitch: clamp(data.pitch, -1, 1),
         roll: clamp(data.roll, -1, 1),
-        at: performance.now(),
+        at: Number.isFinite(data.at)
+          ? Math.min(performance.now(), data.at!)
+          : performance.now(),
       };
   };
   constructor() {
@@ -68,7 +73,7 @@ export class TiltInput {
           active(['KeyA', 'ArrowLeft'], 'left'),
       };
     // Keyboard overrides the sensor. A stale packet can never latch a tilt on.
-    return this.sensor && now - this.sensor.at < 250
+    return this.sensor && freshMotion(now - this.sensor.at)
       ? { pitch: this.sensor.pitch, roll: this.sensor.roll }
       : { pitch: 0, roll: 0 };
   }

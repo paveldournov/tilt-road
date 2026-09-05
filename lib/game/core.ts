@@ -55,7 +55,8 @@ export const TREASURE_SPACING = 48;
 export function treasure(index: number) {
   return {
     s: TREASURE_START + index * TREASURE_SPACING,
-    x: (Math.floor(random(index + 8) * 3) - 1) * 5.3,
+    // A smooth, repeatable trail: no impossible full-road jumps at top speed.
+    x: Math.sin(index * 0.32) * 5.3,
     radius: 1.2,
   };
 }
@@ -121,4 +122,42 @@ export function advanceFrame(state: GameState, input: Tilt, elapsed: number) {
   const duration = Math.min(elapsed, 0.25);
   const count = Math.ceil(duration * 120);
   for (let i = 0; i < count; i++) step(state, input, duration / count);
+}
+
+/** 120 Hz simulation, bounded catch-up, reusable interpolated render snapshot. */
+export class FixedSimulation {
+  private accumulator = 0;
+  private previous = createState();
+  private display = createState();
+  private source: GameState | null = null;
+  private status: GameState['status'] = 'ready';
+  advance(state: GameState, input: Tilt, elapsed: number): GameState {
+    if (state !== this.source || state.status !== this.status) {
+      this.accumulator = 0;
+      Object.assign(this.previous, state);
+      this.source = state;
+      this.status = state.status;
+    }
+    if (state.status !== 'running') return state;
+    if (Number.isFinite(elapsed) && elapsed > 0)
+      this.accumulator += Math.min(elapsed, 0.25);
+    const dt = 1 / 120;
+    while (this.accumulator + 1e-10 >= dt) {
+      Object.assign(this.previous, state);
+      step(state, input, dt);
+      this.accumulator = Math.max(0, this.accumulator - dt);
+    }
+    Object.assign(this.display, state);
+    const alpha = this.accumulator / dt;
+    for (const key of [
+      'distance',
+      'speed',
+      'lateral',
+      'pitch',
+      'roll',
+    ] as const)
+      this.display[key] =
+        this.previous[key] + (state[key] - this.previous[key]) * alpha;
+    return this.display;
+  }
 }

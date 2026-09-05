@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
+import * as protocol from '../phone/protocol.js';
 
 // Unit harness: render the component's element tree and run its real receiver
 // against a fake socket, without a browser or a new rendering dependency.
@@ -82,7 +83,9 @@ function harness() {
     });
     return exports;
   }
-  const receiver = compile('../lib/game/phone-client.ts');
+  const receiver = compile('../lib/game/phone-client.ts', {
+    '../../phone/protocol.js': protocol,
+  });
   const dialogs = Object.fromEntries(
     [
       'Dialog',
@@ -220,7 +223,7 @@ test('all phone states share one two-line control, with no floating notice', () 
     [{ type: 'room', code: '42' }, 'Waiting for pairing'],
     [{ type: 'paired' }, 'Enable motion & calibrate'],
     [{ type: 'input', pitch: 0, roll: 0 }, 'Motion live'],
-    [{ type: 'suspended' }, 'Motion paused · recalibrate'],
+    [{ type: 'suspended' }, 'Motion paused · zero saved'],
     [{ type: 'unpaired' }, 'Waiting for pairing'],
   ]) {
     socket.receive(message);

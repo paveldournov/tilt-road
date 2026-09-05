@@ -6,7 +6,7 @@
 2. In another terminal, run **`npm run phone:server`**. It prints your computer's LAN setup and HTTPS controller URLs. Leave it running.
 3. On the game, click **Connect iPhone** to show the two-digit code and certificate fingerprint.
 4. On iPhone Safari, on the same network, open the printed **HTTP setup URL**. It provides the certificate profile and instructions. After installation and explicit trust, open the **HTTPS controller URL**.
-5. Enter the code, Connect, Enable motion → Allow. Hold the phone still in portrait with the screen tilted up at a comfortable angle, then Calibrate neutral → Start / Resume.
+5. Enter the code, Connect, Enable motion → Allow. Hold the phone comfortably in portrait, then Calibrate neutral → Start / Resume. Calibration is immediate; there is no hold-still timer.
 
 Tip the phone's top away from you to accelerate, toward you to brake. Lower the left/right edge to steer. The **Steering** and **Acceleration / braking** sliders independently adjust response from **0.5× to 4×**; move right for more sensitivity. Both default to **2×** the original response: full input at 13.5° from neutral instead of 25°. The 2° neutral dead zone remains unchanged. Labels preview while dragging; release to apply. Changes pause the game but preserve calibration—tap Start / Resume to continue. Preferences are saved locally on the phone when browser storage is available; Reset both to 2× restores defaults.
 
@@ -39,7 +39,9 @@ Keys and generated certificates are kept in **`.local/phone/`**, excluded from G
 
 The desktop explicitly opens a room and receives a randomly selected two-digit pairing code (10–99), unique among open rooms. Short codes are convenient but easy to guess: use this only on a trusted private LAN, not a public or shared network. `/game` accepts only loopback connections from the local game's allowed origins. `/phone` accepts only HTTPS-origin WSS connections. The phone must pair before sending anything; one controller is allowed per room. Pairing attempts are rate limited. Payloads are limited to 1 KB, motion to 100 messages/second, samples must be finite and sequenced, and all axes are clamped to [-1,1]. Traffic remains on your LAN; no cloud service is used.
 
-The phone samples device orientation and transmits approximately 30 times per second. Calibration averages stable samples, a 2-degree dead zone suppresses jitter, and the existing game input adapter smooths the tilt. Portrait beta/gamma are relative to the captured neutral. The phone stops after 200 ms without a fresh sensor event. The game receiver pauses after 500 ms without input; the relay also suspends after 600 ms. A fresh stream alone never resumes flight; Start/Resume is explicit. Local keyboard/touch still overrides incoming tilt. This is a game controller, not a safety-rated physical motion controller.
+The phone samples device orientation and transmits approximately 30 times per second. Calibration captures one current reading as zero. A 2-degree dead zone suppresses jitter, and the game simulation smooths tilt. Portrait beta/gamma are relative to the captured neutral. Phone, relay, receiver and input adapter share the same 500 ms freshness limit from `phone/protocol.js`. Samples include `ageMs` so periodic retransmission does not make an old sensor reading appear new. Local clocks are not synchronized; this age does not measure network transit time. Receiver/relay watchdogs run every 100 ms.
+
+The phone does not report streaming or send Start when its socket is closed or congested. Percentages and recalibration still work locally; saved zero survives brief signal interruption. A fresh stream alone never resumes flight; Start/Resume is explicit. Pairing fields collapse after connection; measurements and flight controls precede sensitivity settings. Local keyboard/touch still overrides incoming tilt. This is a game controller, not a safety-rated physical motion controller.
 
 ## Tests
 

@@ -191,7 +191,7 @@ a:focus-visible {
 .game-shell {
   position: relative;
   height: 100svh;
-  min-height: 640px;
+  min-height: 360px;
   overflow: hidden;
 }
 .world {
@@ -650,9 +650,6 @@ kbd {
   }
 }
 @media (max-width: 700px) {
-  .game-shell {
-    min-height: 940px;
-  }
   .upper-hud {
     padding: 17px 20px;
     gap: 24px 16px;
@@ -781,5 +778,323 @@ kbd {
 @media (prefers-reduced-motion: reduce) {
   * {
     transition: none !important;
+  }
+}
+
+/* Flight HUD: one top bar, one instrument strip, an unobstructed road. */
+.top-actions {
+  gap: 12px;
+}
+.top-actions .icon-button {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+}
+.world-summary {
+  font-size: 14px;
+  color: #c0d9d8;
+  align-self: start;
+}
+.world-summary span {
+  padding: 0 8px;
+  color: #75adac;
+}
+.is-flying .key-guide {
+  opacity: 0.65;
+}
+.start-panel {
+  top: 47%;
+  transform: translateY(-50%);
+}
+.start-panel h1 {
+  font-size: clamp(42px, 7.5vh, 76px);
+}
+.compact h1 {
+  font-size: clamp(30px, 5vh, 44px);
+}
+.settings-controls {
+  width: 100%;
+}
+.settings-controls .road-note {
+  display: block;
+}
+.settings-controls .control-label {
+  font-size: 14px;
+}
+.comfort-control {
+  border-top: 1px solid #bbdacf30;
+  padding-top: 18px;
+}
+.comfort-control label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 16px;
+}
+.comfort-control [data-slot='slider'] {
+  padding: 22px 2px;
+}
+.comfort-control [data-slot='slider-track'] {
+  height: 4px;
+  width: 100%;
+  background: #45616b;
+}
+.comfort-control [data-slot='slider-range'] {
+  height: 100%;
+  background: #a9f2d0;
+}
+.comfort-control [data-slot='slider-thumb'] {
+  width: 20px;
+  height: 20px;
+  border: 2px solid #102631;
+}
+.comfort-control p {
+  font-size: 14px;
+  color: #adc7c8;
+  line-height: 1.5;
+}
+.sound-control {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  min-height: 44px;
+  gap: 24px;
+}
+.flight-settings {
+  max-height: calc(100svh - 32px);
+  overflow-y: auto;
+}
+.tilt-horizon {
+  transition: none;
+  will-change: transform;
+}
+.performance-stats {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: #ddf9e9;
+  background: #102631ee;
+  padding: 4px 8px;
+  font: 12px monospace;
+  white-space: nowrap;
+  pointer-events: none;
+}
+@media (max-width: 700px) {
+  .upper-hud {
+    gap: 16px;
+    padding: max(14px, env(safe-area-inset-top)) 18px 0;
+    grid-template-columns: 1fr;
+  }
+  .topbar {
+    gap: 12px;
+  }
+  .top-actions {
+    width: auto;
+    gap: 8px;
+    flex: 1;
+    justify-content: flex-end;
+  }
+  .brand {
+    font-size: 16px;
+    letter-spacing: 1px;
+  }
+  .brand-mark {
+    width: 20px;
+    margin-right: 6px;
+  }
+  .phone-controller-control {
+    min-height: 44px;
+    padding: 8px 10px;
+  }
+  .phone-controller-copy > span:first-child {
+    font-size: 14px;
+  }
+  .phone-controller-summary {
+    display: none;
+  }
+  .world-summary {
+    font-size: 13px;
+  }
+  .run-stats {
+    display: flex;
+    gap: 12px;
+    align-items: baseline;
+    justify-self: stretch;
+    text-align: left;
+    flex-wrap: wrap;
+  }
+  .run-stats > .eyebrow,
+  .run-stats .best,
+  .treasure-count .eyebrow {
+    display: none;
+  }
+  .run-stats > div {
+    font-size: 24px;
+    margin: 0;
+  }
+  .run-stats .treasure-count {
+    margin: 0;
+  }
+  .treasure-count strong {
+    font-size: 24px;
+  }
+  .pickup-feedback {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .start-panel,
+  .compact {
+    left: 50%;
+    top: 46%;
+    transform: translate(-50%, -50%);
+    width: calc(100% - 40px);
+    max-width: 420px;
+    max-height: calc(100svh - 340px);
+    overflow-y: auto;
+    padding: 18px;
+    background: #102631df;
+    border: 1px solid #bbdacf30;
+    border-radius: 8px;
+  }
+  .start-panel h1 {
+    font-size: clamp(32px, 5vh, 48px);
+    margin: 12px 0;
+    line-height: 1;
+  }
+  .start-panel h1 br {
+    display: none;
+  }
+  .start-panel h1 em::before {
+    content: ' ';
+  }
+  .start-panel p {
+    max-width: none;
+    font-size: 16px;
+    margin: 12px 0;
+  }
+  .launch-button {
+    min-height: 48px;
+  }
+  .cockpit {
+    bottom: max(82px, calc(env(safe-area-inset-bottom) + 70px));
+    left: 18px;
+    right: 18px;
+    gap: 12px;
+  }
+  .speed {
+    width: 110px;
+  }
+  .speed .eyebrow,
+  .speed-state {
+    white-space: nowrap;
+    letter-spacing: 0.4px;
+  }
+  .tilt-display .eyebrow {
+    white-space: nowrap;
+    font-size: 12px;
+    letter-spacing: 0;
+  }
+  .tilt-display .eyebrow svg {
+    display: none;
+  }
+  .speed > div:not(.speed-track) {
+    font-size: 38px;
+  }
+  .tilt-display {
+    width: 112px;
+  }
+  .speed-state {
+    font-size: 12px;
+  }
+  .flight-actions {
+    display: flex;
+    flex-direction: column;
+    width: 44px;
+    gap: 6px;
+  }
+  .touch-controls {
+    bottom: max(14px, env(safe-area-inset-bottom));
+    left: 18px;
+    right: 18px;
+    gap: 8px;
+  }
+  .performance-stats {
+    top: 190px;
+    bottom: auto;
+    max-width: 95%;
+    white-space: normal;
+  }
+}
+@media (max-width: 430px) {
+  .brand {
+    width: 100%;
+  }
+  .top-actions {
+    justify-content: space-between;
+  }
+  .phone-controller-control {
+    flex: 1;
+  }
+  .upper-hud {
+    gap: 10px;
+  }
+  .world-summary {
+    display: none;
+  }
+}
+@media (max-height: 600px) {
+  .upper-hud {
+    padding-top: 10px;
+    row-gap: 10px;
+  }
+  .world-summary,
+  .key-guide,
+  .best {
+    display: none;
+  }
+  .run-stats {
+    grid-column: 2;
+  }
+  .start-panel,
+  .compact {
+    top: 44%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: min(430px, 75vw);
+    max-height: calc(100svh - 180px);
+    overflow: auto;
+    padding: 16px;
+    background: #102631ed;
+    border-radius: 8px;
+  }
+  .start-panel h1 {
+    font-size: 32px;
+    margin: 8px 0;
+  }
+  .start-panel h1 br,
+  .start-panel > .eyebrow {
+    display: none;
+  }
+  .start-panel p {
+    margin: 8px 0 14px;
+    font-size: 14px;
+  }
+  .cockpit {
+    bottom: 12px;
+  }
+  .speed > div:not(.speed-track) {
+    font-size: 32px;
+  }
+  .touch-controls {
+    position: absolute;
+    left: 40%;
+    right: 20%;
+    bottom: 14px;
+  }
+  .tilt-display {
+    display: none;
   }
 }

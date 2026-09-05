@@ -1,3 +1,5 @@
+import { MAX_BUFFER_BYTES, freshMotion } from '../../phone/protocol.js';
+
 type LinkInfo = {
   code: string;
   setupUrl: string;
@@ -8,7 +10,7 @@ type Callbacks = {
   connection?: (state: ConnectionState) => void;
   info: (info: LinkInfo | null) => void;
   status: (status: string) => void;
-  input: (tilt: { pitch: number; roll: number }) => void;
+  input: (tilt: { pitch: number; roll: number; at?: number }) => void;
   command: (action: 'start' | 'restart' | 'pause') => void;
   lost: () => void;
   state: () => { status: string; speed: number };
@@ -52,12 +54,14 @@ export class PhoneClient {
       if (
         msg.type === 'input' &&
         Number.isFinite(msg.pitch) &&
-        Number.isFinite(msg.roll)
+        Number.isFinite(msg.roll) &&
+        freshMotion(msg.ageMs ?? 0)
       ) {
         const becameActive = !this.active;
-        this.lastSample = performance.now();
+        this.lastSample = performance.now() - (msg.ageMs ?? 0);
         this.active = true;
         this.callbacks.input({
+          at: this.lastSample,
           pitch: Math.max(-1, Math.min(1, msg.pitch)),
           roll: Math.max(-1, Math.min(1, msg.roll)),
         });
@@ -72,7 +76,7 @@ export class PhoneClient {
       ) {
         if (
           msg.action === 'pause' ||
-          (this.active && performance.now() - this.lastSample < 300)
+          (this.active && freshMotion(performance.now() - this.lastSample))
         )
           this.callbacks.command(msg.action);
       }
@@ -81,7 +85,7 @@ export class PhoneClient {
         this.callbacks.status(
           msg.type === 'unpaired'
             ? 'Waiting for iPhone'
-            : 'iPhone paused · recalibrate',
+            : 'Motion paused · zero position saved',
         );
         this.callbacks.connection?.(
           msg.type === 'unpaired' ? 'disconnected' : 'paused',
@@ -103,12 +107,15 @@ export class PhoneClient {
       }
     };
     this.timer = setInterval(() => {
-      if (this.active && performance.now() - this.lastSample > 500) {
+      if (this.active && !freshMotion(performance.now() - this.lastSample)) {
         this.stopInput();
         this.callbacks.status('Signal lost · game paused');
         this.callbacks.connection?.('paused');
       }
-      if (socket.readyState === WebSocket.OPEN && socket.bufferedAmount < 4096)
+      if (
+        socket.readyState === WebSocket.OPEN &&
+        socket.bufferedAmount < MAX_BUFFER_BYTES
+      )
         socket.send(
           JSON.stringify({ type: 'state', ...this.callbacks.state() }),
         );

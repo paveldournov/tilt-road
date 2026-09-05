@@ -2,11 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
+import * as protocol from '../phone/protocol.js';
 import {
   tiltSample,
   normalizeSensitivity,
   DEFAULT_SENSITIVITY,
-  neutralFromSamples,
 } from '../phone/motion.js';
 
 test('new default doubles the original response and preserves neutral and signs', () => {
@@ -93,10 +93,10 @@ async function controllerHarness(initial = null, failStorage = false) {
     close() {}
   }
   const context = {
+    ...protocol,
     tiltSample,
     normalizeSensitivity,
     DEFAULT_SENSITIVITY,
-    neutralFromSamples,
     document: { getElementById: element, hidden: false, addEventListener() {} },
     window: {
       isSecureContext: true,
@@ -124,7 +124,7 @@ async function controllerHarness(initial = null, failStorage = false) {
   };
   const source = (
     await readFile(new URL('../phone/controller.js', import.meta.url), 'utf8')
-  ).replace(/^import[\s\S]*?from ['"]\.\/motion\.js['"];\s*/, '');
+  ).replace(/import[\s\S]*?from ['"]\.\/(motion|protocol)\.js['"];\s*/g, '');
   vm.runInNewContext(source, context);
   return {
     element,
@@ -144,6 +144,35 @@ async function pairAndEnable(h) {
   h.Socket.current.onmessage({ data: JSON.stringify({ type: 'paired' }) });
   await h.element('enable').onclick();
 }
+
+test('blocked transmission cannot claim streaming or send a start, but zero and meters still work', async () => {
+  const h = await controllerHarness();
+  await pairAndEnable(h);
+  assert.equal(h.element('pairing').hidden, true);
+  assert.equal(h.element('intro').hidden, true);
+  h.context.orientation({ beta: 30, gamma: 0 });
+  h.element('calibrate').onclick();
+  h.Socket.current.bufferedAmount = 5000;
+  h.context.orientation({ beta: 20, gamma: 10 });
+  const before = h.sent.length;
+  assert.equal(h.context.transmit(), false);
+  assert.equal(h.element('start').disabled, true);
+  assert.equal(h.element('motion-state').textContent, 'SIGNAL BLOCKED');
+  h.element('start').onclick();
+  assert.equal(h.sent.length, before);
+  h.element('calibrate').onclick();
+  assert.equal(h.element('pitch').textContent, '0%');
+  assert.equal(h.element('roll').textContent, '0%');
+  h.Socket.current.bufferedAmount = 0;
+  h.context.orientation({ beta: 18, gamma: 15 });
+  assert.equal(h.context.transmit(), true);
+  assert.equal(h.element('start').disabled, false);
+  h.advance(400);
+  h.context.transmit();
+  assert.equal(h.sent.at(-1).ageMs, 400);
+  h.advance(100);
+  assert.equal(h.context.transmit(), false);
+});
 test('phone sliders restore, preview, apply independently, pause once and retain calibration', async () => {
   const h = await controllerHarness(JSON.stringify({ pitch: 1.5, roll: 3 }));
   assert.equal(Number(h.element('pitch-sensitivity').value), 1.5);

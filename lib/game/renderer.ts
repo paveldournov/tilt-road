@@ -58,6 +58,37 @@ export class RoadRenderer {
   private roll = 0;
   private focal = 600;
   private faces: Face[] = [];
+  private chunks = new Map<string, Face[]>();
+  private worldKey = '';
+  private projected: (Face & { depth: number })[] = [];
+  private projectionPool: (Face & { depth: number })[] = [];
+  private lastTime = -1;
+  private lastDistance = -1;
+  private cameraBank = 1;
+  private reducedMotion = false;
+  private sky: CanvasGradient | null = null;
+  /** Optional comfort setting; board tilt remains accurate even with banking off. */
+  configure(options: { bank: number; reducedMotion: boolean }) {
+    this.cameraBank = Number.isFinite(options.bank)
+      ? Math.max(0, Math.min(1, options.bank))
+      : 1;
+    this.reducedMotion = options.reducedMotion;
+  }
+  get diagnostics() {
+    return { chunks: this.chunks.size, faces: this.faces.length };
+  }
+  private cached(key: string, build: () => void) {
+    let geometry = this.chunks.get(key);
+    if (!geometry) {
+      const output = this.faces;
+      this.faces = [];
+      build();
+      geometry = this.faces;
+      this.chunks.set(key, geometry);
+      this.faces = output;
+    }
+    for (const face of geometry) this.faces.push(face);
+  }
   private roadFrames = new Map<
     number,
     { x: number; y: number; bank: number; cos: number; sin: number }
@@ -74,6 +105,7 @@ export class RoadRenderer {
     this.resize();
   }
   private resize() {
+    this.sky = null;
     const b = this.canvas.getBoundingClientRect();
     this.width = Math.max(1, b.width);
     this.height = Math.max(1, b.height);
@@ -102,7 +134,7 @@ export class RoadRenderer {
       z: s - x * c.sin,
     };
   }
-  private view(v: V): V {
+  private view(v: V, out: V): V {
     const x = v.x - this.cam.x,
       y = v.y - this.cam.y,
       z = v.z - this.cam.z;
@@ -111,11 +143,10 @@ export class RoadRenderer {
       rz = x * sy + z * cy;
     const ry = y * cp - rz * sp,
       zz = y * sp + rz * cp;
-    return {
-      x: rx * cr - ry * sr,
-      y: rx * sr + ry * cr,
-      z: zz,
-    };
+    out.x = rx * cr - ry * sr;
+    out.y = rx * sr + ry * cr;
+    out.z = zz;
+    return out;
   }
   private fogColor(color: string, fog: string, depth: number) {
     const level = Math.round(
@@ -186,8 +217,18 @@ export class RoadRenderer {
     this.polygon(h, top);
   }
   render(state: GameState, scenery: Scenery, time: number) {
+    const worldKey = state.topology + ':' + scenery;
+    const reset =
+      this.worldKey !== worldKey ||
+      state.distance < this.lastDistance ||
+      Math.abs(state.distance - this.lastDistance) > 100;
+    if (this.worldKey !== worldKey) {
+      this.chunks.clear();
+      this.worldKey = worldKey;
+    }
     this.roadFrames.clear();
     if (this.fogScenery !== scenery) {
+      this.sky = null;
       this.fogColors.clear();
       this.fogScenery = scenery;
     }
@@ -197,13 +238,25 @@ export class RoadRenderer {
       p = palettes[scenery],
       mode = state.topology,
       s = state.distance;
-    // Fixed vertical field of view keeps the deck visible on ultrawide displays.
-    this.focal = h * 0.95;
+    const dt =
+      this.lastTime < 0 ? 0 : Math.max(0, Math.min(0.1, time - this.lastTime));
+    this.lastTime = time;
+    this.lastDistance = s;
+    const blend = reset || dt === 0 ? 1 : 1 - Math.exp(-dt * 10);
+    const look = 8 + state.speed * 0.12;
     const c = road(s, mode),
-      ahead = road(s + 2, mode);
-    this.yaw = Math.atan2(ahead.x - c.x, 2);
-    this.pitch = Math.atan2(ahead.y - c.y, 2) - 0.025 - state.pitch * 0.025;
-    this.roll = -state.roll * 0.07 - c.bank * 0.3;
+      ahead = road(s + look, mode);
+    const yaw = Math.atan2(ahead.x - c.x, look);
+    const pitch = Math.atan2(ahead.y - c.y, look) - 0.025 - state.pitch * 0.02;
+    this.yaw += (yaw - this.yaw) * blend;
+    this.pitch += (pitch - this.pitch) * blend;
+    const bank = this.reducedMotion ? 0 : this.cameraBank;
+    this.roll +=
+      ((-state.roll * 0.07 - c.bank * 0.3) * bank - this.roll) * blend;
+    // Subtle speed-driven widening, with no extra motion in comfort mode.
+    const focal =
+      h * (0.95 - (this.reducedMotion ? 0 : (state.speed / 96) * 0.07));
+    this.focal += (focal - this.focal) * blend;
     this.rotation = {
       cy: Math.cos(this.yaw),
       sy: Math.sin(this.yaw),
@@ -215,14 +268,16 @@ export class RoadRenderer {
     this.cam = this.point(
       s,
       state.lateral,
-      3.3 + Math.sin(time * 1.5) * 0.025,
+      3.3 + (this.reducedMotion ? 0 : Math.sin(time * 1.5) * 0.025),
       mode,
     );
-    const sky = ctx.createLinearGradient(0, 0, 0, h * 0.7);
-    sky.addColorStop(0, p.sky);
-    sky.addColorStop(0.72, p.horizon);
-    sky.addColorStop(1, p.ground);
-    ctx.fillStyle = sky;
+    if (!this.sky) {
+      this.sky = ctx.createLinearGradient(0, 0, 0, h * 0.7);
+      this.sky.addColorStop(0, p.sky);
+      this.sky.addColorStop(0.72, p.horizon);
+      this.sky.addColorStop(1, p.ground);
+    }
+    ctx.fillStyle = this.sky;
     ctx.fillRect(0, 0, w, h);
     ctx.save();
     ctx.translate(
@@ -264,51 +319,70 @@ export class RoadRenderer {
       ctx.fill();
     }
     ctx.globalAlpha = 1;
-    this.faces = [];
-    const start = Math.floor((s - 16) / 10) * 10;
-    for (let z = start; z < s + 950; z += 10) {
-      this.quad(z, z + 10, -1000, 1000, -3.5, -3.5, mode, p.ground);
-      this.quad(z, z + 10, -9.35, 9.35, -0.24, -0.24, mode, '#142631');
-      this.quad(
-        z,
-        z + 10,
-        -9,
-        9,
-        0,
-        0,
-        mode,
-        Math.floor(z / 10) % 2
-          ? p.road
-          : scenery === 'night'
-            ? '#122035'
-            : scenery === 'desert'
-              ? '#40363e'
-              : '#273740',
-      );
-      for (const side of [-1, 1]) {
-        this.quad(
-          z,
-          z + 10,
-          side * 8.75 - 0.1,
-          side * 8.75 + 0.1,
-          0.025,
-          0.025,
-          mode,
-          p.stripe,
-        );
-        this.quad(
-          z,
-          z + 5.8,
-          side * 3 - 0.035,
-          side * 3 + 0.035,
-          0.035,
-          0.035,
-          mode,
-          scenery === 'night' ? '#536689' : '#6b7c7d',
-        );
-        if (z % 40 === 0)
-          this.box(z, side * 9.6, 0.12, 1.1, 0.12, mode, p.stripe, '#e1ffef');
-      }
+    this.faces.length = 0;
+    const retained = new Set<string>();
+    const start = Math.floor((s - 20) / 100);
+    for (let chunk = start; chunk <= Math.floor((s + 950) / 100); chunk++) {
+      const distant = chunk * 100 - s > 450;
+      const key = 'road:' + chunk + ':' + distant;
+      retained.add(key);
+      this.cached(key, () => {
+        const stride = distant ? 20 : 10;
+        for (let z = chunk * 100; z < (chunk + 1) * 100; z += stride) {
+          this.quad(z, z + stride, -1000, 1000, -3.5, -3.5, mode, p.ground);
+          this.quad(z, z + stride, -9.35, 9.35, -0.24, -0.24, mode, '#142631');
+          this.quad(
+            z,
+            z + stride,
+            -9,
+            9,
+            0,
+            0,
+            mode,
+            Math.floor(z / 10) % 2
+              ? p.road
+              : scenery === 'night'
+                ? '#122035'
+                : scenery === 'desert'
+                  ? '#40363e'
+                  : '#273740',
+          );
+          for (const side of [-1, 1]) {
+            this.quad(
+              z,
+              z + stride,
+              side * 8.75 - 0.1,
+              side * 8.75 + 0.1,
+              0.025,
+              0.025,
+              mode,
+              p.stripe,
+            );
+            if (!distant)
+              this.quad(
+                z,
+                z + 5.8,
+                side * 3 - 0.035,
+                side * 3 + 0.035,
+                0.035,
+                0.035,
+                mode,
+                scenery === 'night' ? '#536689' : '#6b7c7d',
+              );
+            if (z % 40 === 0)
+              this.box(
+                z,
+                side * 9.6,
+                0.12,
+                1.1,
+                0.12,
+                mode,
+                p.stripe,
+                '#e1ffef',
+              );
+          }
+        }
+      });
     }
     const first = Math.max(
       0,
@@ -343,77 +417,96 @@ export class RoadRenderer {
         );
       }
     }
-    for (let i = Math.floor((s - 50) / 35); i < Math.floor(s / 35) + 27; i++)
-      for (const side of [-1, 1]) {
-        const z = i * 35 + random(i + side) * 15,
-          x = side * (23 + random(i * 3 + side) * 90),
-          tall = 12 + random(i + 400) * 55;
-        if (scenery === 'night') {
-          this.box(
-            z,
-            x,
-            7 + random(i) * 12,
-            tall,
-            10,
-            mode,
-            '#18263d',
-            '#324663',
-            -3,
-          );
-          this.box(
-            z - 5.1,
-            x,
-            0.15,
-            tall * 0.8,
-            0.1,
-            mode,
-            i % 3 ? '#64bfc9' : '#ad7dad',
-            '#b4edee',
-            -2,
-          );
-        } else {
-          const b = this.point(z, x, -3.3, mode),
-            size = 9 + random(i + 60) * 17,
-            tip = { x: b.x + size * 0.15, y: b.y + tall, z: b.z },
-            a = { x: b.x - size, y: b.y, z: b.z - size },
-            d = { x: b.x + size, y: b.y, z: b.z - size },
-            e = { x: b.x, y: b.y, z: b.z + size };
-          this.polygon([a, d, tip], p.terrain);
-          this.polygon([d, e, tip], p.light);
-          this.polygon([e, a, tip], p.terrain);
-          if (scenery === 'coast' && i % 2 === 0) {
-            const t = this.point(
-              z + 15,
-              side * (14 + random(i) * 7),
-              -2.5,
+    for (let i = Math.floor((s - 50) / 35); i < Math.floor(s / 35) + 27; i++) {
+      const distant = i * 35 - s > 450;
+      const key = 'scenery:' + i + ':' + distant;
+      retained.add(key);
+      this.cached(key, () => {
+        for (const side of [-1, 1]) {
+          const z = i * 35 + random(i + side) * 15,
+            x = side * (23 + random(i * 3 + side) * 90),
+            tall = 12 + random(i + 400) * 55;
+          if (scenery === 'night') {
+            this.box(
+              z,
+              x,
+              7 + random(i) * 12,
+              tall,
+              10,
               mode,
+              '#18263d',
+              '#324663',
+              -3,
             );
-            for (let n = 0; n < 3; n++) {
-              const r = 3.3 - n * 0.7,
-                y = n * 2;
-              this.polygon(
-                [
-                  { x: t.x - r, y: t.y + y, z: t.z },
-                  { x: t.x + r, y: t.y + y, z: t.z },
-                  { x: t.x, y: t.y + y + 5, z: t.z },
-                ],
-                n % 2 ? '#244e4c' : '#193f42',
+            if (!distant)
+              this.box(
+                z - 5.1,
+                x,
+                0.15,
+                tall * 0.8,
+                0.1,
+                mode,
+                i % 3 ? '#64bfc9' : '#ad7dad',
+                '#b4edee',
+                -2,
               );
+          } else {
+            const b = this.point(z, x, -3.3, mode),
+              size = 9 + random(i + 60) * 17,
+              tip = { x: b.x + size * 0.15, y: b.y + tall, z: b.z },
+              a = { x: b.x - size, y: b.y, z: b.z - size },
+              d = { x: b.x + size, y: b.y, z: b.z - size },
+              e = { x: b.x, y: b.y, z: b.z + size };
+            this.polygon([a, d, tip], p.terrain);
+            this.polygon([d, e, tip], p.light);
+            this.polygon([e, a, tip], p.terrain);
+            if (!distant && scenery === 'coast' && i % 2 === 0) {
+              const t = this.point(
+                z + 15,
+                side * (14 + random(i) * 7),
+                -2.5,
+                mode,
+              );
+              for (let n = 0; n < 3; n++) {
+                const r = 3.3 - n * 0.7,
+                  y = n * 2;
+                this.polygon(
+                  [
+                    { x: t.x - r, y: t.y + y, z: t.z },
+                    { x: t.x + r, y: t.y + y, z: t.z },
+                    { x: t.x, y: t.y + y + 5, z: t.z },
+                  ],
+                  n % 2 ? '#244e4c' : '#193f42',
+                );
+              }
             }
           }
         }
+      });
+    }
+    for (const key of this.chunks.keys())
+      if (!retained.has(key)) this.chunks.delete(key);
+    const projected = this.projected;
+    projected.length = 0;
+    for (let i = 0; i < this.faces.length; i++) {
+      const source = this.faces[i];
+      let face = this.projectionPool[i];
+      if (!face)
+        this.projectionPool[i] = face = { color: '', points: [], depth: 0 };
+      face.color = source.color;
+      face.depth = 0;
+      let visible = false;
+      for (let j = 0; j < source.points.length; j++) {
+        const out = face.points[j] ?? (face.points[j] = { x: 0, y: 0, z: 0 });
+        this.view(source.points[j], out);
+        face.depth += out.z;
+        visible ||= out.z >= 0.5;
       }
-    const projected = this.faces
-      .map((face) => {
-        const points = face.points.map((v) => this.view(v));
-        return {
-          color: face.color,
-          points,
-          depth: points.reduce((sum, v) => sum + v.z, 0) / points.length,
-        };
-      })
-      .filter((face) => face.points.some((v) => v.z >= 0.5))
-      .sort((a, b) => b.depth - a.depth);
+      face.points.length = source.points.length;
+      face.depth /= source.points.length;
+      if (visible) projected.push(face);
+    }
+    projected.sort((a, b) => b.depth - a.depth);
     for (const face of projected) {
       const clipped: V[] = [];
       for (let i = 0; i < face.points.length; i++) {
@@ -509,7 +602,18 @@ export class RoadRenderer {
       ],
       p.stripe,
     );
-    if (state.pickupFlash > 0) {
+    if (state.pickupFlash > 0 && !this.reducedMotion) {
+      const progress = 1 - state.pickupFlash / 0.65;
+      ctx.fillStyle = '#ffdf79';
+      ctx.globalAlpha = 1 - progress;
+      for (let i = 0; i < 12; i++) {
+        const angle = (i * Math.PI) / 6;
+        const radius = ((25 + progress * 120) * h) / 800;
+        const x = w / 2 + Math.cos(angle) * radius;
+        const y = h * 0.49 + Math.sin(angle) * radius * 0.6;
+        ctx.fillRect(x - 2, y - 2, 4, 4);
+      }
+      ctx.globalAlpha = 1;
       ctx.fillStyle = `rgba(255,215,100,${state.pickupFlash * 0.07})`;
       ctx.fillRect(0, 0, w, h);
     }

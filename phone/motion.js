@@ -34,18 +34,3 @@ export function tiltSample(
     roll: axis(angleDelta(gamma, neutral.gamma), gains.roll),
   };
 }
-export function neutralFromSamples(samples) {
-  if (samples.length < 8) return null;
-  const last = samples.slice(-15);
-  const beta = last.reduce((s, p) => s + p.beta, 0) / last.length,
-    gamma = last.reduce((s, p) => s + p.gamma, 0) / last.length;
-  if (
-    Math.abs(beta) > 65 ||
-    Math.abs(gamma) > 45 ||
-    last.some(
-      (p) => Math.abs(p.beta - beta) > 3 || Math.abs(p.gamma - gamma) > 3,
-    )
-  )
-    return null;
-  return { beta, gamma };
-}

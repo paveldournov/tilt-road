@@ -1,13 +1,13 @@
 'use client';
 
-import { memo, startTransition, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
   ArrowUpRight,
   RotateCcw,
   Pause,
   Play,
   Maximize,
-  Activity,
+  Settings2,
   Mountain,
   Route,
 } from 'lucide-react';
@@ -20,8 +20,6 @@ import {
 } from '@/components/ui/select';
 import {
   createState,
-  advanceFrame,
-  MAX_SPEED,
   type GameState,
   type Topology,
   type Scenery,
@@ -30,6 +28,20 @@ import { TiltInput } from '@/lib/game/input';
 import { RoadRenderer } from '@/lib/game/renderer';
 import { PhoneLink as PhoneLinkComponent } from '@/components/phone-link';
 import { registerGameTools, type GameModelContext } from '@/lib/game/webmcp';
+
+import { FlightRuntime } from '@/lib/game/runtime';
+import { TelemetryStore } from '@/lib/game/telemetry';
+import { PickupAudio } from '@/lib/game/audio';
+import { RunStats, Speed, TiltInstrument } from '@/components/flight-hud';
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogDescription,
+  DialogTrigger,
+} from '@/components/ui/dialog';
+import { Slider } from '@/components/ui/slider';
+import { Switch } from '@/components/ui/switch';
 
 const roads = { flow: 'Flow', serpentine: 'Serpentine', alpine: 'Alpine' };
 // Speed/score telemetry must not re-render the phone dialog and its controls.
@@ -48,33 +60,41 @@ export default function Home() {
   const [topology, setTopology] = useState<Topology>('flow');
   const [scenery, setScenery] = useState<Scenery>('coast');
   const sceneryRef = useRef<Scenery>('coast');
-  const [best, setBest] = useState(0);
+  const [telemetry] = useState(() => new TelemetryStore());
+  const audio = useRef(new PickupAudio());
+  const rendererRef = useRef<RoadRenderer | null>(null);
+  const [bank, setBank] = useState(1);
+  const [sound, setSound] = useState(false);
+  const [settings, setSettings] = useState(false);
+  const [profile, setProfile] = useState('');
+  const reducedMotion = useRef(false);
   const [error, setError] = useState('');
   const [fullscreen, setFullscreen] = useState(false);
 
-  function begin() {
+  const begin = useCallback(() => {
+    audio.current.unlock();
     game.current.status = 'running';
     input.current?.clear();
     canvas.current?.focus();
     setHud({ ...game.current });
-  }
-  function restart() {
+  }, []);
+  const restart = useCallback(() => {
     game.current = createState(game.current.topology);
     begin();
-  }
-  function pause() {
+  }, [begin]);
+  const pause = useCallback(() => {
     if (game.current.status === 'running') game.current.status = 'paused';
     else if (game.current.status === 'paused') game.current.status = 'running';
     input.current?.clear();
     canvas.current?.focus();
     setHud({ ...game.current });
-  }
-  function changeRoad(value: Topology) {
+  }, []);
+  const changeRoad = useCallback((value: Topology) => {
     setTopology(value);
     game.current = createState(value);
     input.current?.clear();
     setHud({ ...game.current });
-  }
+  }, []);
   useEffect(() => {
     if (!canvas.current) return;
     // A live development update can retain the previous game-state shape.
@@ -89,6 +109,31 @@ export default function Home() {
       );
       return;
     }
+    rendererRef.current = renderer;
+    const preference = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const comfort = () => {
+      reducedMotion.current = preference.matches;
+      renderer.configure({
+        bank: Number(localStorageSafe('roadtilt-bank') ?? 1),
+        reducedMotion: preference.matches,
+      });
+    };
+    function localStorageSafe(key: string) {
+      try {
+        return localStorage.getItem(key);
+      } catch {
+        return null;
+      }
+    }
+    const savedBank = Math.max(
+      0,
+      Math.min(1, Number(localStorageSafe('roadtilt-bank') ?? 1)),
+    );
+    setBank(Number.isFinite(savedBank) ? savedBank : 1);
+    audio.current.enabled = localStorageSafe('roadtilt-sound') === 'true';
+    setSound(audio.current.enabled);
+    comfort();
+    preference.addEventListener('change', comfort);
     const controller = new TiltInput();
     input.current = controller;
     const onPhoneCommand = (event: Event) => {
@@ -97,13 +142,17 @@ export default function Home() {
         controller.clear();
         if (game.current.status === 'running') game.current.status = 'paused';
         setHud({ ...game.current });
-      } else if (!document.hidden && action === 'restart') restart();
-      else if (
+      } else if (!document.hidden && action === 'restart') {
+        setSettings(false);
+        restart();
+      } else if (
         !document.hidden &&
         action === 'start' &&
         ['ready', 'paused'].includes(game.current.status)
-      )
+      ) {
+        setSettings(false);
         begin();
+      }
     };
     window.addEventListener('roadtilt:phone-command', onPhoneCommand);
     const unregister = registerGameTools(
@@ -115,24 +164,24 @@ export default function Home() {
         sceneryRef.current = world;
       },
     );
-    let frame = 0,
-      last = performance.now(),
-      lastRender = 0,
-      update = 0,
-      record = 0,
-      savedRecord = 0,
-      lastSave = 0;
-    try {
-      record = Number(localStorage.getItem('roadtilt-best')) || 0;
-      savedRecord = record;
-      setBest(record);
-    } catch {
-      /* Storage is optional. */
-    }
+    const runtime = new FlightRuntime({
+      state: () => game.current,
+      scenery: () => sceneryRef.current,
+      input: controller,
+      renderer,
+      telemetry,
+      onStatus: setHud,
+      onPickup: () => audio.current.play(),
+      profile: new URLSearchParams(location.search).has('stats')
+        ? setProfile
+        : undefined,
+    });
     const onKey = (event: KeyboardEvent) => {
       if (
         event.target instanceof HTMLElement &&
-        event.target.closest('button,input,[role="combobox"],[role="listbox"]')
+        event.target.closest(
+          'button,input,[role="dialog"],[role="slider"],[role="switch"],[role="combobox"],[role="listbox"]',
+        )
       )
         return;
       if (event.repeat) return;
@@ -151,7 +200,7 @@ export default function Home() {
         setHud({ ...game.current });
       }
       controller.clear();
-      saveRecord();
+      runtime.save();
     };
     const onVisibility = () => {
       if (document.hidden) onBlur();
@@ -162,50 +211,14 @@ export default function Home() {
     window.addEventListener('blur', onBlur);
     document.addEventListener('visibilitychange', onVisibility);
     document.addEventListener('fullscreenchange', onFullscreen);
-    function tick(now: number) {
-      const dt = (now - last) / 1000;
-      last = now;
-      if (document.hidden) {
-        frame = requestAnimationFrame(tick);
-        return;
-      }
-      advanceFrame(game.current, controller.read(now), dt);
-      const renderInterval =
-        game.current.status === 'running' ? 1000 / 60 : 1000 / 20;
-      if (now - lastRender >= renderInterval - 0.5) {
-        renderer.render(game.current, sceneryRef.current, now / 1000);
-        lastRender = now - ((now - lastRender) % renderInterval);
-      }
-      if (game.current.status === 'running' && now - update > 75) {
-        update = now;
-        const snapshot = { ...game.current };
-        startTransition(() => setHud(snapshot));
-        if (Math.floor(game.current.distance) > record) {
-          record = Math.floor(game.current.distance);
-          startTransition(() => setBest(record));
-        }
-        if (now - lastSave >= 1000) {
-          saveRecord();
-          lastSave = now;
-        }
-      }
-      frame = requestAnimationFrame(tick);
-    }
-    frame = requestAnimationFrame(tick);
-    function saveRecord() {
-      record = Math.max(record, Math.floor(game.current.distance));
-      if (record <= savedRecord) return;
-      try {
-        localStorage.setItem('roadtilt-best', String(record));
-        savedRecord = record;
-      } catch {
-        /* Storage is optional. */
-      }
-    }
+    runtime.start();
+    const soundEngine = audio.current;
     return () => {
-      saveRecord();
+      runtime.save();
       unregister();
-      cancelAnimationFrame(frame);
+      runtime.dispose();
+      soundEngine.dispose();
+      preference.removeEventListener('change', comfort);
       renderer.dispose();
       controller.dispose();
       window.removeEventListener('roadtilt:phone-command', onPhoneCommand);
@@ -214,11 +227,13 @@ export default function Home() {
       document.removeEventListener('visibilitychange', onVisibility);
       document.removeEventListener('fullscreenchange', onFullscreen);
     };
-  }, []);
+  }, [begin, restart, pause, changeRoad, telemetry]);
 
   const ready = hud.status === 'ready';
   return (
-    <main className="game-shell">
+    <main
+      className={`game-shell ${hud.status === 'running' ? 'is-flying' : 'is-idle'}`}
+    >
       <canvas
         ref={canvas}
         tabIndex={0}
@@ -234,6 +249,140 @@ export default function Home() {
           </a>
           <div className="top-actions">
             <PhoneLink game={game} />
+            <Dialog
+              open={settings}
+              onOpenChange={(open) => {
+                setSettings(open);
+                if (open && game.current.status === 'running') pause();
+              }}
+            >
+              <DialogTrigger
+                className="icon-button"
+                aria-label="Flight settings"
+              >
+                <Settings2 size={19} />
+              </DialogTrigger>
+              <DialogContent className="phone-pair-dialog flight-settings">
+                <DialogTitle>Flight settings</DialogTitle>
+                <DialogDescription>
+                  Choose your road, scenery, and comfort. Close settings to
+                  resume when ready.
+                </DialogDescription>
+                <section
+                  className="world-controls settings-controls"
+                  aria-label="World settings"
+                >
+                  <div className="control-label">
+                    <Route size={16} />
+                    <span>ROAD TOPOLOGY</span>
+                  </div>
+                  <Select
+                    value={topology}
+                    onValueChange={(v) => {
+                      if (v) changeRoad(v as Topology);
+                    }}
+                    onOpenChange={(open) => {
+                      if (open && game.current.status === 'running') pause();
+                    }}
+                  >
+                    <SelectTrigger
+                      aria-label="Road topology"
+                      className="world-select"
+                    >
+                      <SelectValue>{roads[topology]}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(roads).map(([key, title]) => (
+                        <SelectItem key={key} value={key}>
+                          {title}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <div className="control-label scenery-label">
+                    <Mountain size={16} />
+                    <span>SCENERY</span>
+                  </div>
+                  <Select
+                    value={scenery}
+                    onValueChange={(v) => {
+                      if (v) {
+                        setScenery(v as Scenery);
+                        sceneryRef.current = v as Scenery;
+                      }
+                    }}
+                    onOpenChange={(open) => {
+                      if (open && game.current.status === 'running') pause();
+                    }}
+                  >
+                    <SelectTrigger
+                      aria-label="Scenery"
+                      className="world-select"
+                    >
+                      <SelectValue>{worlds[scenery]}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.entries(worlds).map(([key, title]) => (
+                        <SelectItem key={key} value={key}>
+                          {title}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <span className="road-note">
+                    Changing road starts a new run.
+                  </span>
+                </section>
+
+                <div className="comfort-control">
+                  <label id="bank-label">
+                    Camera banking <output>{Math.round(bank * 100)}%</output>
+                  </label>
+                  <Slider
+                    aria-labelledby="bank-label"
+                    value={[bank * 100]}
+                    min={0}
+                    max={100}
+                    step={10}
+                    onValueChange={(value) => {
+                      const next =
+                        (Array.isArray(value) ? value[0] : value) / 100;
+                      setBank(next);
+                      rendererRef.current?.configure({
+                        bank: next,
+                        reducedMotion: reducedMotion.current,
+                      });
+                      try {
+                        localStorage.setItem('roadtilt-bank', String(next));
+                      } catch {
+                        /* Optional. */
+                      }
+                    }}
+                  />
+                  <p>
+                    0% keeps the horizon level. Reduced-motion preferences also
+                    disable camera banking and pickup bursts.
+                  </p>
+                </div>
+                <label className="sound-control" htmlFor="treasure-sounds">
+                  Treasure sounds{' '}
+                  <Switch
+                    id="treasure-sounds"
+                    checked={sound}
+                    onCheckedChange={(value) => {
+                      setSound(value);
+                      audio.current.enabled = value;
+                      audio.current.unlock();
+                      try {
+                        localStorage.setItem('roadtilt-sound', String(value));
+                      } catch {
+                        /* Optional. */
+                      }
+                    }}
+                  />
+                </label>
+              </DialogContent>
+            </Dialog>
             <button
               className="icon-button"
               aria-label={fullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
@@ -254,81 +403,10 @@ export default function Home() {
             </button>
           </div>
         </header>
-        <section className="world-controls" aria-label="World settings">
-          <div className="control-label">
-            <Route size={16} />
-            <span>ROAD TOPOLOGY</span>
-          </div>
-          <Select
-            value={topology}
-            onValueChange={(v) => {
-              if (v) changeRoad(v as Topology);
-            }}
-            onOpenChange={(open) => {
-              if (open && game.current.status === 'running') pause();
-            }}
-          >
-            <SelectTrigger aria-label="Road topology" className="world-select">
-              <SelectValue>{roads[topology]}</SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {Object.entries(roads).map(([key, title]) => (
-                <SelectItem key={key} value={key}>
-                  {title}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <div className="control-label scenery-label">
-            <Mountain size={16} />
-            <span>SCENERY</span>
-          </div>
-          <Select
-            value={scenery}
-            onValueChange={(v) => {
-              if (v) {
-                setScenery(v as Scenery);
-                sceneryRef.current = v as Scenery;
-              }
-            }}
-            onOpenChange={(open) => {
-              if (open && game.current.status === 'running') pause();
-            }}
-          >
-            <SelectTrigger aria-label="Scenery" className="world-select">
-              <SelectValue>{worlds[scenery]}</SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {Object.entries(worlds).map(([key, title]) => (
-                <SelectItem key={key} value={key}>
-                  {title}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <span className="road-note">Changing road starts a new run.</span>
-        </section>
-        <aside className="run-stats">
-          <div
-            className="treasure-count"
-            aria-label={`${hud.collected} treasures collected`}
-          >
-            <span className="eyebrow">TREASURES</span>
-            <strong>◆ {hud.collected}</strong>
-            <span
-              className="pickup-feedback"
-              style={{ opacity: hud.pickupFlash > 0 ? 1 : 0 }}
-            >
-              +1 TREASURE
-            </span>
-          </div>
-          <span className="eyebrow">DISTANCE</span>
-          <div>
-            {(hud.distance / 1000).toFixed(2)}
-            <small> KM</small>
-          </div>
-          <span className="best">BEST {(best / 1000).toFixed(2)} KM</span>
-        </aside>
+        <div className="world-summary">
+          {roads[topology]} <span> / </span> {worlds[scenery]}
+        </div>
+        <RunStats store={telemetry} />
       </div>
       <div className="reticle" aria-hidden="true">
         <span />
@@ -374,48 +452,8 @@ export default function Home() {
         </div>
       )}
       <footer className="cockpit">
-        <section className="speed">
-          <span className="eyebrow">GROUND SPEED</span>
-          <div>
-            {Math.round(hud.speed * 3.6)
-              .toString()
-              .padStart(3, '0')}
-            <small>KM/H</small>
-          </div>
-          <div className="speed-track">
-            <i style={{ width: `${(hud.speed / MAX_SPEED) * 100}%` }} />
-          </div>
-          <span className="speed-state">
-            {hud.status === 'running'
-              ? hud.pitch > 0.1
-                ? 'ACCELERATING'
-                : hud.pitch < -0.1
-                  ? 'BRAKING'
-                  : hud.speed < 0.1
-                    ? 'STATIONARY'
-                    : 'COASTING'
-              : 'READY FOR FLIGHT'}
-          </span>
-        </section>
-        <section className="tilt-display" aria-label="Platform tilt">
-          <span className="eyebrow">
-            <Activity size={14} /> PLATFORM TILT
-          </span>
-          <div className="tilt-meter">
-            <div
-              className="tilt-horizon"
-              style={{
-                transform: `translateY(${hud.pitch * 12}px) rotate(${hud.roll * 22}deg)`,
-              }}
-            >
-              <i />
-            </div>
-          </div>
-          <span className="tilt-value">
-            {Math.round(hud.roll * 22)}° ROLL <b> / </b>
-            {Math.round(hud.pitch * 16)}° PITCH
-          </span>
-        </section>
+        <Speed store={telemetry} />
+        <TiltInstrument store={telemetry} />
         <section className="key-guide">
           <div>
             <kbd>W</kbd>
@@ -458,6 +496,11 @@ export default function Home() {
           <span>SPACE pause · R restart</span>
         </div>
       </footer>
+      {profile && (
+        <output className="performance-stats" aria-label="Renderer diagnostics">
+          {profile}
+        </output>
+      )}
       <div className="touch-controls" aria-label="Touch flight controls">
         {[
           ['left', '←'],

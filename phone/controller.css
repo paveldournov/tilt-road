@@ -7,6 +7,9 @@
 * {
   box-sizing: border-box;
 }
+[hidden] {
+  display: none !important;
+}
 body {
   margin: 0;
   background: radial-gradient(ellipse at top right, #29505a, transparent 65%);
@@ -21,7 +24,33 @@ header {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  margin-bottom: 35px;
+  margin-bottom: 18px;
+}
+#message {
+  min-height: 1.5em;
+  margin: 12px 0;
+  font-size: 14px;
+}
+#motion-controls {
+  padding: 16px;
+  margin: 14px 0;
+}
+#motion-controls > p:first-of-type {
+  font-size: 14px;
+  margin: 8px 0;
+  line-height: 1.45;
+}
+.telemetry {
+  margin-top: 14px;
+  padding: 18px;
+  font-variant-numeric: tabular-nums;
+}
+.sensitivity-settings {
+  margin-top: 28px;
+}
+#enable,
+#calibrate {
+  width: 100%;
 }
 .brand {
   font-weight: 800;
@@ -75,7 +104,7 @@ h2 {
   gap: 10px;
 }
 .section-title .badge {
-  font-size: 10px;
+  font-size: 12px;
 }
 button,
 a.primary {
@@ -166,7 +195,7 @@ label {
   scroll-margin-top: 12px;
 }
 #calibration-message {
-  min-height: 3em;
+  min-height: 2em;
   margin-bottom: 0;
   color: #d9ebe4;
   font-size: 14px;
@@ -241,7 +270,7 @@ meter {
   grid-column: 1/-1;
 }
 .hint {
-  font-size: 13px;
+  font-size: 14px;
   color: #9ebfbc;
 }
 .notice {

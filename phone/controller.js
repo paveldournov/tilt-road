@@ -3,6 +3,11 @@ import {
   normalizeSensitivity,
   DEFAULT_SENSITIVITY,
 } from './motion.js';
+import {
+  MOTION_INTERVAL_MS,
+  MAX_BUFFER_BYTES,
+  freshMotion,
+} from './protocol.js';
 const $ = (id) => document.getElementById(id);
 const sensitivityKey = 'roadtilt-phone-sensitivity-v1';
 let sensitivity = normalizeSensitivity();
@@ -27,10 +32,23 @@ const message = (text) => {
   $('calibration-message').textContent = text;
 };
 const send = (data) => {
-  if (socket?.readyState === WebSocket.OPEN && socket.bufferedAmount < 4096)
+  if (
+    socket?.readyState !== WebSocket.OPEN ||
+    socket.bufferedAmount >= MAX_BUFFER_BYTES
+  )
+    return false;
+  try {
     socket.send(JSON.stringify(data));
+    return true;
+  } catch {
+    return false;
+  }
 };
 function controls() {
+  $('pairing').hidden = paired;
+  $('message').hidden = paired;
+  $('intro').hidden = paired;
+  $('enable').hidden = enabled;
   $('enable').disabled = !paired || enabled;
   $('calibrate').disabled = !paired || !enabled;
   $('calibrate').textContent = neutral
@@ -42,7 +60,9 @@ function controls() {
     sample &&
     !document.hidden &&
     portrait() &&
-    performance.now() - lastEvent <= 500;
+    freshMotion(performance.now() - lastEvent) &&
+    socket?.readyState === WebSocket.OPEN &&
+    socket.bufferedAmount < MAX_BUFFER_BYTES;
   $('start').disabled = !ready;
   $('restart').disabled = !ready;
   $('pause').disabled = !paired;
@@ -190,7 +210,7 @@ $('calibrate').onclick = () => {
     suspend('Rotate back to portrait before calibrating.');
     return;
   }
-  if (!sample) {
+  if (!sample || !freshMotion(performance.now() - lastEvent)) {
     message(
       'No motion reading yet. Enable motion and allow Safari access, then tap Calibrate again.',
     );
@@ -219,7 +239,11 @@ function updateMeasurements() {
 function transmit() {
   const value = updateMeasurements();
   if (!paired || !value) return false;
-  if (document.hidden || !portrait() || performance.now() - lastEvent > 500) {
+  if (
+    document.hidden ||
+    !portrait() ||
+    !freshMotion(performance.now() - lastEvent)
+  ) {
     if (streaming)
       suspend(
         'Motion interrupted. Return to portrait with Safari visible. Your zero position is saved.',
@@ -227,12 +251,27 @@ function transmit() {
     controls();
     return false;
   }
-  send({ type: 'input', ...value, seq: seq++ });
+  if (
+    !send({
+      type: 'input',
+      ...value,
+      seq: seq++,
+      ageMs: performance.now() - lastEvent,
+    })
+  ) {
+    streaming = false;
+    $('motion-state').textContent = 'SIGNAL BLOCKED';
+    message(
+      'Signal delayed. Measurements and zero are kept; check Wi-Fi before resuming.',
+    );
+    controls();
+    return false;
+  }
   streaming = true;
   $('motion-state').textContent = 'CALIBRATED';
   return true;
 }
-setInterval(transmit, 33);
+setInterval(transmit, MOTION_INTERVAL_MS);
 for (const action of ['start', 'pause', 'restart'])
   $(action).onclick = () => {
     if (action !== 'pause') {
@@ -294,16 +333,18 @@ $('disconnect').onclick = () => {
 };
 document.addEventListener('visibilitychange', () => {
   if (document.hidden)
-    suspend('Phone was hidden or locked. Recalibrate to resume.');
+    suspend(
+      'Phone was hidden or locked. Zero saved; tap Start / Resume when ready.',
+    );
 });
 window.addEventListener('pagehide', () => {
   send({ type: 'suspend' });
   socket?.close();
 });
 window.addEventListener('orientationchange', () =>
-  suspend('Screen orientation changed. Return to portrait and recalibrate.'),
+  suspend('Return to portrait. Zero saved; tap Start / Resume when ready.'),
 );
 screen.orientation?.addEventListener('change', () =>
-  suspend('Screen orientation changed. Return to portrait and recalibrate.'),
+  suspend('Return to portrait. Zero saved; tap Start / Resume when ready.'),
 );
 controls();

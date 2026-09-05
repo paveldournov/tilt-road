@@ -3,12 +3,11 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import https from 'node:https';
 import { once } from 'node:events';
-import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { WebSocket } from 'ws';
 import { attachRelay } from '../scripts/phone/relay.mjs';
 import { ensureCertificates } from '../scripts/phone/certificates.mjs';
-import { tiltSample, neutralFromSamples, angleDelta } from '../phone/motion.js';
+import { tiltSample, angleDelta } from '../phone/motion.js';
 
 test('phone angles map forward/back and left/right with neutral and dead zone', () => {
   const neutral = { beta: 30, gamma: 0 };
@@ -21,12 +20,6 @@ test('phone angles map forward/back and left/right with neutral and dead zone', 
   assert.equal(tiltSample(85, 0, neutral).pitch, -1);
   assert.equal(tiltSample(NaN, 0, neutral), null);
   assert.equal(angleDelta(-179, 179), 2);
-});
-test('calibration needs stable, supported samples', () => {
-  const samples = Array.from({ length: 15 }, () => ({ beta: 30, gamma: 5 }));
-  assert.deepEqual(neutralFromSamples(samples), { beta: 30, gamma: 5 });
-  assert.equal(neutralFromSamples(samples.slice(0, 3)), null);
-  assert.equal(neutralFromSamples([...samples, { beta: 60, gamma: 5 }]), null);
 });
 
 function peer(url, options = {}) {
@@ -109,6 +102,7 @@ test('TLS relay pairs, streams, pauses on loss, and rejects unauthorized control
   phone.send({ type: 'input', pitch: 0.6, roll: -0.4, seq: 0 });
   assert.deepEqual(await game.receive('input'), {
     type: 'input',
+    ageMs: 0,
     pitch: 0.6,
     roll: -0.4,
   });
@@ -137,6 +131,7 @@ test('TLS relay pairs, streams, pauses on loss, and rejects unauthorized control
   phone.send({ type: 'input', pitch: 9, roll: -9, seq: 1 });
   assert.deepEqual(await game.receive('input'), {
     type: 'input',
+    ageMs: 0,
     pitch: 1,
     roll: -1,
   });

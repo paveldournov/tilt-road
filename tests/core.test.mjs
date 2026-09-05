@@ -8,9 +8,44 @@ import {
   HALF_WIDTH,
   MAX_SPEED,
   advanceFrame,
+  FixedSimulation,
 } from '../lib/game/core.ts';
 import { registerGameTools } from '../lib/game/webmcp.ts';
 const neutral = { pitch: 0, roll: 0 };
+
+test('fixed clock is identical at 30, 60, 90 and 144 Hz, with bounded catch-up', () => {
+  const results = [30, 60, 90, 144].map((hz) => {
+    const state = running(),
+      clock = new FixedSimulation();
+    for (let i = 0; i < hz * 5; i++) {
+      const display = clock.advance(state, { pitch: 1, roll: 0.1 }, 1 / hz);
+      assert.ok(display.distance <= state.distance + 1e-8);
+      assert.ok(state.distance - display.distance <= MAX_SPEED / 120 + 1e-8);
+    }
+    return state;
+  });
+  for (const state of results) assert.deepEqual(state, results[0]);
+  const clock = new FixedSimulation(),
+    state = running();
+  state.speed = MAX_SPEED;
+  clock.advance(state, neutral, 100);
+  assert.ok(state.distance <= MAX_SPEED * 0.25 + 1e-8);
+  state.status = 'paused';
+  const original = { ...state };
+  clock.advance(state, { pitch: 1, roll: 1 }, 10);
+  assert.deepEqual(state, original);
+  const restart = running();
+  assert.equal(clock.advance(restart, neutral, 0).distance, 0);
+});
+
+test('treasure trail changes gradually enough to follow at maximum speed', () => {
+  for (let i = 1; i < 10000; i++) {
+    const before = treasure(i - 1),
+      next = treasure(i);
+    const available = (next.s - before.s) / MAX_SPEED;
+    assert.ok(Math.abs(next.x - before.x) < available * 5);
+  }
+});
 function running() {
   const s = createState();
   s.status = 'running';

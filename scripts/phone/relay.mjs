@@ -1,12 +1,18 @@
 import { randomInt } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 
+import {
+  MOTION_STALE_MS,
+  MAX_BUFFER_BYTES,
+  freshMotion,
+} from '../../phone/protocol.js';
+
 export const isLoopback = (ip) =>
   ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(ip);
 export function attachRelay(
   httpServer,
   httpsServer,
-  { origins, phoneOrigins, info, staleMs = 600 },
+  { origins, phoneOrigins, info, staleMs = MOTION_STALE_MS },
 ) {
   const wss = new WebSocketServer({
     noServer: true,
@@ -17,7 +23,8 @@ export function attachRelay(
     attempts = new Map();
   const send = (ws, data) => {
     if (ws?.readyState === WebSocket.OPEN) {
-      if (ws.bufferedAmount > 65536) ws.close(1013, 'Connection too slow');
+      if (ws.bufferedAmount > MAX_BUFFER_BYTES)
+        ws.close(1013, 'Connection too slow');
       else ws.send(JSON.stringify(data));
     }
   };
@@ -100,7 +107,7 @@ export function attachRelay(
       if (game) {
         if (
           msg.type === 'state' &&
-          ['ready', 'running', 'paused', 'crashed'].includes(msg.status) &&
+          ['ready', 'running', 'paused'].includes(msg.status) &&
           Number.isFinite(msg.speed)
         )
           send(room.phone, {
@@ -168,10 +175,16 @@ export function attachRelay(
           return;
         }
         room.lastSeq = msg.seq;
-        room.lastInput = Date.now();
+        const age = msg.ageMs ?? 0;
+        if (!freshMotion(age)) {
+          suspend(room, 'Motion reading expired.');
+          return;
+        }
+        room.lastInput = Date.now() - age;
         room.active = true;
         send(room.game, {
           type: 'input',
+          ageMs: age,
           pitch: Math.max(-1, Math.min(1, msg.pitch)),
           roll: Math.max(-1, Math.min(1, msg.roll)),
         });
@@ -208,7 +221,7 @@ export function attachRelay(
   httpsServer.on('upgrade', upgrade);
   const watchdog = setInterval(() => {
     for (const room of rooms.values())
-      if (room.active && Date.now() - room.lastInput > staleMs)
+      if (room.active && Date.now() - room.lastInput >= staleMs)
         suspend(room, 'Motion stream lost.');
     for (const [ip, a] of attempts)
       if (Date.now() - a.at > 60000) attempts.delete(ip);
